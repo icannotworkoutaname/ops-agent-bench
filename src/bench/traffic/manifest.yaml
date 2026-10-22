@@ -1,0 +1,51 @@
+# 流量发生器的 manifest。__XXX__ 占位符由 traffic/__init__.py 用 config/env.yaml 的值替换。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: __NAMESPACE__
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: __NAME__
+  namespace: __NAMESPACE__
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: __NAME__
+  template:
+    metadata:
+      labels:
+        app: __NAME__
+    spec:
+      containers:
+        - name: __NAME__
+          image: __IMAGE__
+          # 镜像预先放进 minikube 节点；Docker Hub 不稳定，不依赖每次现拉
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-u", "/app/gen.py"]
+          env:
+            - name: INGEST_URL
+              value: "__INGEST_URL__"
+            - name: QUERY_URL
+              value: "__QUERY_URL__"
+            - name: PORT
+              value: "__PORT__"
+          ports:
+            - containerPort: __PORT__
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: __PORT__
+            periodSeconds: 5
+          volumeMounts:
+            - name: script
+              mountPath: /app
+          resources:
+            requests: {cpu: 20m, memory: 32Mi}
+            limits: {cpu: 200m, memory: 128Mi}
+      volumes:
+        - name: script
+          configMap:
+            name: __NAME__-script

@@ -5,25 +5,12 @@
 的处理最直接，代码也最短。
 """
 
-import subprocess
 from pathlib import Path
 
+from bench.admin_k8s import kubectl as _kubectl
 from bench.config import EnvConfig
 
 HERE = Path(__file__).parent
-
-
-def _kubectl(env: EnvConfig, *args: str, stdin: str | None = None) -> str:
-    result = subprocess.run(
-        ["kubectl", "--context", env.kube_context, *args],
-        input=stdin,
-        capture_output=True,
-        text=True,
-        check=False,  # 下面自己检查返回码，这样报错信息里能带上 stderr
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"kubectl {' '.join(args)} 失败: {result.stderr.strip()}")
-    return result.stdout
 
 
 def render_manifest(env: EnvConfig) -> str:

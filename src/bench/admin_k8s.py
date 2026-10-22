@@ -141,8 +141,10 @@ class AdminK8s:
             )
         return sorted(info, key=lambda i: i["created"])
 
-    def pod_logs(self, namespace: str, name: str, tail: int = 200) -> str:
-        return self.core.read_namespaced_pod_log(name, namespace, tail_lines=tail)
+    def pod_logs(self, namespace: str, name: str, tail: int = 200, previous: bool = False) -> str:
+        return self.core.read_namespaced_pod_log(
+            name, namespace, tail_lines=tail, previous=previous
+        )
 
     def consumer_lag(self, group: str) -> int:
         from bench.kafka_lag import parse_describe, total_lag
@@ -153,6 +155,22 @@ class AdminK8s:
 
     def scale_statefulset(self, namespace: str, name: str, replicas: int) -> None:
         kubectl(self.env, "scale", "statefulset", name, "-n", namespace, f"--replicas={replicas}")
+
+    def scale_deployment(self, namespace: str, name: str, replicas: int) -> None:
+        kubectl(self.env, "scale", "deployment", name, "-n", namespace, f"--replicas={replicas}")
+
+    def wait_pods_deleted(self, namespace: str, label_selector: str, timeout_s: int = 90) -> None:
+        kubectl(
+            self.env,
+            "wait",
+            "--for=delete",
+            "pod",
+            "-l",
+            label_selector,
+            "-n",
+            namespace,
+            f"--timeout={timeout_s}s",
+        )
 
     def set_deployment_env(
         self, namespace: str, name: str, container: str, var: str, value: str

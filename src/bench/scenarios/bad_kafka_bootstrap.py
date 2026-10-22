@@ -1,5 +1,6 @@
 """bad-kafka-bootstrap：把 stream-processor 的 KAFKA_BOOTSTRAP_SERVERS 改成一个解析不到的地址。"""
 
+import contextlib
 import re
 
 from bench.scenarios.base import GroundTruth, Outcome, Scenario, wait_until
@@ -28,9 +29,15 @@ class BadKafkaBootstrap(Scenario):
 
     def inject(self) -> None:
         d = self._dep
+        # 为什么先缩到 0：只改环境变量会触发滚动更新，而单副本时新 Pod 起不来、
+        # 旧 Pod 会一直保留并继续消费（实测过），lag 不会上涨，故障就不明显。
+        # 先把旧 Pod 全部停掉，再带着错误配置重新起一个，才是“配置错了又重启”的真实情形。
+        self.k8s.scale_deployment(d.namespace, d.name, 0)
+        self.k8s.wait_pods_deleted(d.namespace, "app=stream-processor")
         self.k8s.set_deployment_env(
             d.namespace, d.name, "stream-processor", "KAFKA_BOOTSTRAP_SERVERS", BAD_BOOTSTRAP
         )
+        self.k8s.scale_deployment(d.namespace, d.name, 1)
         self.mark_injected()
 
     def verify_injected(self, timeout: float) -> Outcome:
@@ -47,6 +54,10 @@ class BadKafkaBootstrap(Scenario):
             pods = self.k8s.pods_info(d.namespace, "app=stream-processor")
             newest = pods[-1]
             logs = self.k8s.pod_logs(d.namespace, newest["name"])
+            # 崩溃循环时当前容器可能刚启动、日志还是空的，错误在上一次崩溃的日志里；
+            # 还没有“上一次”容器时 API 会报错，忽略即可
+            with contextlib.suppress(Exception):
+                logs += self.k8s.pod_logs(d.namespace, newest["name"], previous=True)
             has_error = bool(CONNECT_ERROR.search(logs))
 
             detail = (

@@ -128,6 +128,32 @@ class AdminK8s:
         )
         return json.loads(resp.data)
 
+    def control_plane_auth_errors(self, window_seconds: int) -> dict[str, int]:
+        """统计控制面组件最近 window_seconds 秒日志里的认证错误条数。
+
+        背景：机器休眠 / 黑屏后时钟跳变，控制面用的 ServiceAccount token 会过期，
+        之后控制器对 apiserver 的写操作会报 Unauthorized。这类错误不会让任何 Pod 变成
+        NotReady，所以普通的健康检查看不出来，但它会以事件的形式漏给 agent，污染评测结果。
+        只有测试框架（管理侧）会去读 kube-system，agent 的工具看不到这个 namespace。
+        """
+        counts: dict[str, int] = {}
+        for component in ("kube-controller-manager", "kube-apiserver"):
+            pods = self.core.list_namespaced_pod(
+                "kube-system", label_selector=f"component={component}"
+            ).items
+            n = 0
+            for pod in pods:
+                text = self.core.read_namespaced_pod_log(
+                    pod.metadata.name, "kube-system", since_seconds=window_seconds
+                )
+                n += sum(
+                    1
+                    for line in text.splitlines()
+                    if "unauthorized" in line.lower() or "token has expired" in line.lower()
+                )
+            counts[component] = n
+        return counts
+
     def pods_info(self, namespace: str, label_selector: str) -> list[dict]:
         """某个工作负载的 Pod 概况，包括容器卡在什么状态（waiting reason）。"""
         info = []

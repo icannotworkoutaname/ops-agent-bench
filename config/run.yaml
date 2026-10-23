@@ -76,3 +76,8 @@ health:
   # 窗口内允许的失败次数
   max_write_fail: 0
   max_query_fail: 0
+  # 控制面（controller-manager / apiserver）最近这么多秒的日志里，认证错误（Unauthorized、
+  # token 过期）不能超过这个条数。用来发现“机器休眠后 token 过期”这类不会让 Pod 变 NotReady、
+  # 但会以事件形式污染 agent 所见内容的问题
+  control_plane_window_seconds: 300
+  max_control_plane_auth_errors: 0

@@ -56,6 +56,18 @@ def check_traffic(k8s: AdminK8s, cfg: dict) -> tuple[bool, str]:
     return not problems, detail if not problems else detail + "；" + "；".join(problems)
 
 
+def check_control_plane(k8s: AdminK8s, cfg: dict) -> tuple[bool, str]:
+    window = cfg["control_plane_window_seconds"]
+    counts = k8s.control_plane_auth_errors(window)
+    total = sum(counts.values())
+    detail = (
+        f"最近 {window}s 内的认证错误条数 {counts}（允许 ≤ {cfg['max_control_plane_auth_errors']}）"
+    )
+    if total > cfg["max_control_plane_auth_errors"]:
+        detail += "。可能是休眠后 token 过期，需要重启 minikube"
+    return total <= cfg["max_control_plane_auth_errors"], detail
+
+
 def run_health(env: EnvConfig, run_cfg: dict, k8s: AdminK8s) -> list[Check]:
     cfg = run_cfg["health"]
     checks: list[Check] = []
@@ -88,6 +100,7 @@ def run_health(env: EnvConfig, run_cfg: dict, k8s: AdminK8s) -> list[Check]:
             )
         )
     checks.append(_safe("traffic (写入/查询)", lambda: check_traffic(k8s, cfg)))
+    checks.append(_safe("control-plane (认证错误)", lambda: check_control_plane(k8s, cfg)))
     return checks
 
 

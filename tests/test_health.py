@@ -1,6 +1,6 @@
 """健康检查的判断逻辑。用假的 k8s 客户端，不需要集群。"""
 
-from bench.health import _safe, check_consumer_lag, check_traffic
+from bench.health import _safe, check_consumer_lag, check_control_plane, check_traffic
 
 HEADER = "GROUP TOPIC PARTITION CURRENT-OFFSET LOG-END-OFFSET LAG CONSUMER-ID HOST CLIENT-ID\n"
 
@@ -73,6 +73,31 @@ def test_traffic_too_few_successes_is_unhealthy():
     # 流量发生器刚启动或根本没在发时，“没有失败”不等于“链路正常”
     ok, _ = check_traffic(FakeK8s(stats=stats(write_ok=0, query_ok=0)), CFG)
     assert not ok
+
+
+class ControlPlaneK8s:
+    def __init__(self, counts):
+        self.counts = counts
+        self.window = None
+
+    def control_plane_auth_errors(self, window_seconds):
+        self.window = window_seconds
+        return self.counts
+
+
+CP_CFG = {"control_plane_window_seconds": 300, "max_control_plane_auth_errors": 0}
+
+
+def test_control_plane_without_auth_errors_is_healthy():
+    k8s = ControlPlaneK8s({"kube-controller-manager": 0, "kube-apiserver": 0})
+    ok, _ = check_control_plane(k8s, CP_CFG)
+    assert ok and k8s.window == 300
+
+
+def test_control_plane_auth_errors_make_the_environment_unhealthy():
+    k8s = ControlPlaneK8s({"kube-controller-manager": 2, "kube-apiserver": 0})
+    ok, detail = check_control_plane(k8s, CP_CFG)
+    assert not ok and "重启 minikube" in detail
 
 
 def test_safe_turns_exceptions_into_failed_check():

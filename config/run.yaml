@@ -9,6 +9,14 @@ scenario:
   # bad-kafka-bootstrap 的症状：lag 至少比注入后第一次采样多出这么多才算“在上涨”
   min_lag_growth: 30
 
+tools:
+  # 单个工具返回给模型的最大字符数，超出会被截断并注明原长度
+  max_output_chars: 6000
+  default_log_tail_lines: 100
+  # get_pod_logs 的 tail 上限，模型要求更大的值也只给这么多
+  max_log_tail_lines: 300
+  max_events: 30
+
 health:
   # 消费者组 lag（所有分区求和）低于这个值才算健康。
   # 先给一个宽松的初值，等观察过干净环境下带流量的基线后再收紧（见 stage-1.md）。

@@ -119,6 +119,11 @@ class FakeK8s:
     def traffic_stats(self, window):
         return self.stats
 
+    log_text = ""
+
+    def pod_logs(self, namespace, name, tail=200, previous=False, since_seconds=None):
+        return self.log_text
+
     def statefulset_ready(self, namespace, name):
         return self.sts_ready
 
@@ -259,13 +264,45 @@ def test_sp_oom_limits_memory_requests_and_limits_together():
     assert res["limits"]["memory"] == res["requests"]["memory"] == "128Mi"
 
 
-def test_kafka_down_needs_failed_writes_and_kafka_not_ready():
+def test_kafka_down_needs_kafka_gone_and_connection_errors_in_the_service_logs():
+    # 实测：Kafka 停掉后写入请求仍返回 202，症状只在日志里（见 kafka_down.py 的说明）
     k8s = FakeK8s()
-    k8s.stats = {"write": {"fail": 3, "avg_ms": 0, "last_error": "timed out"}, "query": {"fail": 0}}
+    k8s.pods = [pod(ready=True)]  # 三个服务的 Pod 都保持 Ready
+    k8s.log_text = "WARN NetworkClient : Error connecting to node kafka-controller-0:9092"
     k8s.sts_ready = (False, "ready 0/0")
-    assert make("kafka-down", k8s).verify_injected(0).ok
+    out = make("kafka-down", k8s).verify_injected(0)
+    assert out.ok and "ingestion-service" in out.detail
+
+
+def test_kafka_down_without_log_errors_is_not_a_symptom():
+    k8s = FakeK8s()
+    k8s.pods = [pod(ready=True)]
+    k8s.log_text = "INFO normal line"
+    k8s.sts_ready = (False, "ready 0/0")
+    assert not make("kafka-down", k8s).verify_injected(0).ok
+
+
+def test_kafka_down_with_kafka_still_running_is_not_a_symptom():
+    k8s = FakeK8s()
+    k8s.pods = [pod(ready=True)]
+    k8s.log_text = "Error connecting to node kafka-controller-0"
     k8s.sts_ready = (True, "ready 1/1")
     assert not make("kafka-down", k8s).verify_injected(0).ok
+
+
+def test_kafka_down_only_reads_logs_written_after_the_injection():
+    seen = []
+
+    class Recording(FakeK8s):
+        def pod_logs(self, namespace, name, tail=200, previous=False, since_seconds=None):
+            seen.append(since_seconds)
+            return "Error connecting to node kafka-controller-0"
+
+    k8s = Recording()
+    k8s.pods = [pod(ready=True)]
+    k8s.sts_ready = (False, "ready 0/0")
+    make("kafka-down", k8s).verify_injected(0)
+    assert seen and all(s is not None and s < 30 for s in seen)
 
 
 def test_kafka_down_scales_the_kafka_statefulset():

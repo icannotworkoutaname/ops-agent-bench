@@ -192,9 +192,16 @@ class AdminK8s:
             )
         return sorted(info, key=lambda i: i["created"])
 
-    def pod_logs(self, namespace: str, name: str, tail: int = 200, previous: bool = False) -> str:
+    def pod_logs(
+        self,
+        namespace: str,
+        name: str,
+        tail: int = 200,
+        previous: bool = False,
+        since_seconds: int | None = None,
+    ) -> str:
         return self.core.read_namespaced_pod_log(
-            name, namespace, tail_lines=tail, previous=previous
+            name, namespace, tail_lines=tail, previous=previous, since_seconds=since_seconds
         )
 
     def consumer_lag(self, group: str) -> int:

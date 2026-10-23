@@ -16,8 +16,9 @@ class SpOom(Scenario):
         component="stream-processor",
         expected_action="提高 stream-processor 的内存 limit（恢复到 512Mi）",
     )
-    # 实测后再补全（OOMKilled 还是 OutOfMemoryError，见 docs 里的稳定性报告）
-    signatures = ("OOMKilled", "java.lang.OutOfMemoryError")
+    # 实测（128Mi，3 轮）：容器每次都是被内核 OOMKilled（exit 137），没有出现 JVM 自己的
+    # OutOfMemoryError，所以特征字符串只写实测到的这一个
+    signatures = ("OOMKilled",)
 
     def inject(self) -> None:
         d = self.deployment("stream-processor")

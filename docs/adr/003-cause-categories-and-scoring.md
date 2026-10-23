@@ -4,8 +4,9 @@
 
 ## Status
 
-Accepted for stage 2. The taxonomy is the stage-1 draft, confirmed by the repository owner and
-**frozen for this stage**: categories are not added, removed or renamed while results are being collected.
+Accepted for stage 2. The taxonomy is the stage-1 draft, unchanged. The stage-2 plan says it is fixed once the
+repository owner confirms it (**pending confirmation**), and that it must not change during this stage:
+categories are not added, removed or renamed while results are being collected.
 
 ## Context
 
@@ -56,7 +57,8 @@ and we must decide, without a human in the loop, whether it was right.
 
 ## 状态
 
-第 2 阶段采纳。分类沿用第 1 阶段的草稿，经仓库所有者确认，**本阶段内固定**：收集结果期间不增、不删、不改名。
+第 2 阶段采纳。分类沿用第 1 阶段的草稿，没有改动。第 2 阶段计划写明“由仓库所有者确认后固定”（**待确认**），
+并且本阶段内不得改动：收集结果期间不增、不删、不改名。
 
 ## 背景
 

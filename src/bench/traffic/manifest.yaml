@@ -32,6 +32,10 @@ spec:
               value: "__QUERY_URL__"
             - name: PORT
               value: "__PORT__"
+            - name: DEFAULT_RATE
+              value: "__DEFAULT_RATE__"
+            - name: WRITER_THREADS
+              value: "__WRITER_THREADS__"
           ports:
             - containerPort: __PORT__
           readinessProbe:
@@ -43,8 +47,9 @@ spec:
             - name: script
               mountPath: /app
           resources:
-            requests: {cpu: 20m, memory: 32Mi}
-            limits: {cpu: 200m, memory: 128Mi}
+            # 高速率场景（过载、cpu 限流）需要足够的 CPU 才能把压力打出去
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: "__CPU_LIMIT__", memory: 256Mi}
       volumes:
         - name: script
           configMap:

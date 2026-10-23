@@ -81,6 +81,33 @@ tools:
   prom_max_points: 60
   prom_max_metrics: 100
 
+# 各场景的可调参数。数字都是实测后定的，改动前先用 `bench stability <场景>` 重新验证
+scenario_params:
+  sp-pod-killed:
+    # 症状确认：stream-processor 没有 Ready 的 Pod，且 lag 比第一次采样多出这么多
+    min_lag_growth: 10
+  sp-cpu-throttle:
+    cpu_limit: 100m
+    cpu_request: 50m
+    # 每秒事件数。实测 stream-processor 在 300/s 时才用到 0.13 核，所以 100/s 下 100m 的限制
+    # 不会让它跟不上；400/s 时它需要约 0.16 核，会被限流
+    traffic_rate: 400
+    min_lag_growth: 200
+    # 症状还要求 cAdvisor 里 stream-processor 的 CPU 限流比例不低于这个值：注入时先把它停掉了，
+    # 单靠 lag 上涨分不清是“限流”还是“单纯停机”
+    min_throttle_ratio: 0.5
+  sp-oom:
+    memory_limit: 128Mi
+  postgres-down:
+    min_lag_growth: 5
+  query-probe-misconfig:
+    bad_path: /actuator/healthz
+    # Pod 的容器已经起来这么多秒仍然不 Ready，才算“探针配置错了”而不是“还在启动”
+    min_running_seconds: 60
+  ingestion-overload:
+    traffic_rate: 600
+    min_cpu_cores: 0.4 # ingestion-service 的 CPU limit 是 0.5 核
+
 health:
   # 消费者组 lag（所有分区求和）低于这个值才算健康。
   # 先给一个宽松的初值，等观察过干净环境下带流量的基线后再收紧（见 stage-1.md）。

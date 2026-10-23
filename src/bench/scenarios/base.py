@@ -10,7 +10,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from bench.admin_k8s import AdminK8s
-from bench.config import EnvConfig
+from bench.config import EnvConfig, Workload
 from bench.health import is_healthy, run_health
 
 
@@ -63,6 +63,30 @@ class Scenario(ABC):
         self.run_cfg = run_cfg
         self.k8s = k8s
         self.injected_at: float | None = None
+
+    @property
+    def params(self) -> dict:
+        """本场景在 config/run.yaml 的 scenario_params 里的参数。"""
+        return self.run_cfg.get("scenario_params", {}).get(self.id, {})
+
+    def deployment(self, name: str) -> Workload:
+        return next(d for d in self.env.deployments if d.name == name)
+
+    def redeploy_with_patch(self, dep: Workload, patch: dict) -> None:
+        """先把旧 Pod 全部停掉，再带着修改重新起一个。
+
+        为什么不直接改：对只有 1 个副本的 Deployment 直接改，会触发滚动更新，新 Pod 起不来
+        （配置错了 / 内存太小 / 探针不对）时，旧 Pod 会一直保留并继续服务，对外几乎没有症状
+        （第 1 阶段在 bad-kafka-bootstrap 上实测过）。先停旧 Pod，才是“改错了又重启”的真实情形。
+        """
+        self.k8s.scale_deployment(dep.namespace, dep.name, 0)
+        self.k8s.wait_pods_deleted(dep.namespace, f"app={dep.name}")
+        self.k8s.patch_deployment(dep.namespace, dep.name, patch)
+        self.k8s.scale_deployment(dep.namespace, dep.name, 1)
+
+    def restore_from_manifest(self, manifest_key: str) -> None:
+        """恢复的唯一依据是 music-streaming 仓库里对应的 k8s/*.yaml（只读使用）。"""
+        self.k8s.apply_manifest(str(self.env.manifest_path(manifest_key)))
 
     def mark_injected(self) -> None:
         self.injected_at = time.time()

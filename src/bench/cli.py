@@ -20,6 +20,7 @@ from bench.runlog import RUNS_DIR, RunLog, cumulative_usage
 from bench.runner import RunDeps, execute_run, preflight
 from bench.scenarios import SCENARIOS
 from bench.show import render_run
+from bench.stability import run_stability, summarize
 
 app = typer.Typer(no_args_is_help=True, help="ops-agent-bench 命令行")
 traffic_app = typer.Typer(no_args_is_help=True, help="管理 bench namespace 里的流量发生器")
@@ -71,6 +72,41 @@ def inject(scenario_id: str) -> None:
     typer.echo(("症状已出现: " if outcome.ok else "症状未出现: ") + outcome.detail)
     typer.echo(f"用完请运行: bench restore {scenario_id}")
     raise typer.Exit(0 if outcome.ok else 1)
+
+
+@app.command()
+def stability(
+    scenario_id: str,
+    rounds: int = typer.Option(3, help="连续做几轮"),
+) -> None:
+    """场景稳定性测试：连续做“注入→确认症状→恢复→确认健康”，不调用模型，结果存到 runs/stability/。"""
+    scenario, env, run_cfg = _get_scenario(scenario_id)
+    k8s = scenario.k8s
+
+    def healthy() -> bool:
+        return is_healthy(run_health(env, run_cfg, k8s))
+
+    results = run_stability(
+        lambda: SCENARIOS[scenario_id](env, run_cfg, k8s),
+        rounds,
+        run_cfg,
+        healthy,
+        on_progress=typer.echo,
+    )
+    summary = summarize(results)
+    out_dir = RUNS_DIR / "stability"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = out_dir / f"{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}-{scenario_id}.json"
+    out.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+    typer.echo(
+        f"\n{scenario_id}: 症状出现 {summary['symptom_ok']}/{summary['rounds']}，"
+        f"恢复成功 {summary['restore_ok']}/{summary['rounds']}；"
+        f"注入到症状平均 {summary['avg_inject_to_symptom_seconds']}s，"
+        f"恢复到健康平均 {summary['avg_restore_to_healthy_seconds']}s"
+    )
+    typer.echo(f"详细结果: {out}")
+    ok = summary["symptom_ok"] == rounds and summary["restore_ok"] == rounds
+    raise typer.Exit(0 if ok else 1)
 
 
 @app.command()
@@ -211,6 +247,12 @@ def traffic_down() -> None:
     """删除整个 bench namespace。"""
     traffic.down(load_env())
     typer.echo("bench namespace 已删除")
+
+
+@traffic_app.command("rate")
+def traffic_rate(events_per_second: float) -> None:
+    """调整流量发生器的写入速率（每秒事件数），不重启。"""
+    typer.echo(json.dumps(AdminK8s(load_env()).set_traffic_rate(events_per_second)))
 
 
 @traffic_app.command("stats")

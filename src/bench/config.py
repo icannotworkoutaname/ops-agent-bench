@@ -67,6 +67,9 @@ class TrafficConfig:
     name: str
     port: int
     image: str
+    default_rate: float  # 平时每秒写入多少个事件；场景改过速率后，恢复时调回这个值
+    writer_threads: int
+    cpu_limit: str
 
 
 @dataclass(frozen=True)
@@ -87,6 +90,7 @@ class EnvConfig:
     deployments: list[Workload]
     redis: Workload
     postgres: Workload
+    kafka_sts: Workload  # Kafka 的 StatefulSet（kafka-down 场景缩容用）
     kafka: KafkaConfig
     consumer_groups: list[str]
     secret_target: SecretRef
@@ -112,6 +116,7 @@ def load_env() -> EnvConfig:
         deployments=[Workload(**d) for d in raw["deployments"]],
         redis=Workload(**raw["statefulsets"]["redis"]),
         postgres=Workload(**raw["statefulsets"]["postgres"]),
+        kafka_sts=Workload(**raw["statefulsets"]["kafka"]),
         kafka=KafkaConfig(**raw["kafka"]),
         consumer_groups=raw["consumer_groups"],
         secret_target=SecretRef(**raw["secrets"]["target"]),

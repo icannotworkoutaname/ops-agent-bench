@@ -21,6 +21,9 @@ def render_manifest(env: EnvConfig) -> str:
         "__NAME__": t.name,
         "__PORT__": str(t.port),
         "__IMAGE__": t.image,
+        "__DEFAULT_RATE__": str(t.default_rate),
+        "__WRITER_THREADS__": str(t.writer_threads),
+        "__CPU_LIMIT__": t.cpu_limit,
         "__INGEST_URL__": env.ingestion_url,
         "__QUERY_URL__": env.query_url,
     }.items():

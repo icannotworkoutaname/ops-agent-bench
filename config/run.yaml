@@ -28,11 +28,12 @@ agent:
 # 费用与限额。标注“待填”的值必须由仓库所有者到官方定价页核对后填写；
 # 只要有任何一项是 null，bench run 就拒绝发起真实运行（没有价格就没法控制预算）。
 billing:
-  currency: null # 待填：计费币种，如 CNY / USD。预算和单价都用这个币种
-  budget: null # 待填：runs/ 下累计费用的上限；超过就拒绝再发起新的运行
+  currency: CNY # 计费币种；预算和单价都用这个币种
+  budget: 3.0 # runs/ 下累计费用的上限（账户余额有限，2026-10-23 由仓库所有者定为 3 元）
   max_real_runs: 15 # 第 1 阶段真实 agent 运行总数上限（stage-1.md）
-  # 高峰时段：工作日（周一到周五），UTC。草稿值，待核对官方定价页。
-  # 窗口左闭右开，按每次请求的发出时间判断。
+  # 高峰时段：工作日（周一到周五），UTC。官方定义是北京时间周一至周五（不含中国法定节假日）
+  # 9:00-12:00、14:00-18:00，即 UTC 01:00-04:00、06:00-10:00（2026-10-23 核对官方定价页）。
+  # 窗口左闭右开，按每次请求的发出时间判断。注意：这里只判断“周一到周五”，没有处理法定节假日。
   peak:
     weekdays_only: true
     windows_utc: [["01:00", "04:00"], ["06:00", "10:00"]]
@@ -44,9 +45,9 @@ models:
     model: deepseek-flash
     base_url: https://api.deepseek.com/anthropic
     api_key_env: DEEPSEEK_API_KEY
-    pricing: # 待填
-      peak: {input_cache_miss: null, input_cache_hit: null, output: null}
-      offpeak: {input_cache_miss: null, input_cache_hit: null, output: null}
+    pricing: # 元 / 百万 token；官方定价页 2026-10-23，经仓库所有者确认。官方称空闲时段是高峰的一半
+      peak: {input_cache_miss: 2.0, input_cache_hit: 0.04, output: 8.0}
+      offpeak: {input_cache_miss: 1.0, input_cache_hit: 0.02, output: 4.0}
   deepseek-v4-pro:
     model: deepseek-v4-pro
     base_url: https://api.deepseek.com/anthropic

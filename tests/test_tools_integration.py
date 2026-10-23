@@ -22,6 +22,8 @@ EXPECTED_TOOLS = {
     "get_events",
     "get_deployment",
     "get_consumer_lag",
+    "promql_query",
+    "list_metrics",
 }
 
 
@@ -49,6 +51,16 @@ async def _session_calls() -> dict:
             "lag": await call("get_consumer_lag", {"group": "stream-processor"}),
             "bad_group": await call("get_consumer_lag", {"group": "a; ls"}),
             "events": await call("get_events", {"namespace": "default"}),
+            # Prometheus 所在的 namespace 对 kubectl 类工具不可见，只能通过 promql_query 查数据
+            "monitoring_ns": await call("list_pods", {"namespace": "monitoring"}),
+            "prom_up": await call("promql_query", {"query": "up"}),
+            "prom_range": await call("promql_query", {"query": "up", "range_minutes": 3}),
+            "prom_too_old": await call("promql_query", {"query": "rate(up[30m])"}),
+            "prom_bench": await call(
+                "promql_query",
+                {"query": 'count(container_memory_working_set_bytes{namespace="bench"})'},
+            ),
+            "metrics": await call("list_metrics", {"match": "cfs_throttled"}),
         }
 
 
@@ -66,3 +78,9 @@ def test_mcp_server_end_to_end():
     assert "stream-processor" in r["lag"] and "总 lag" in r["lag"]
     assert r["bad_group"].startswith("错误:")
     assert "事件" in r["events"]
+    assert r["monitoring_ns"].startswith("错误:")
+    assert 'job="apps"' in r["prom_up"] and "返回" in r["prom_up"]
+    assert "个点" in r["prom_range"]
+    assert r["prom_too_old"].startswith("错误:") and "回看窗口" in r["prom_too_old"]
+    assert "没有返回任何序列" in r["prom_bench"]  # 流量发生器所在 namespace 的指标没有被抓取
+    assert "container_cpu_cfs_throttled_periods_total" in r["metrics"]

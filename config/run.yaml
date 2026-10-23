@@ -76,6 +76,10 @@ tools:
   # get_pod_logs 的 tail 上限，模型要求更大的值也只给这么多
   max_log_tail_lines: 300
   max_events: 30
+  # Prometheus 工具的结果上限：超出时只显示一部分，并在结果里写明省略了多少
+  prom_max_series: 20
+  prom_max_points: 60
+  prom_max_metrics: 100
 
 health:
   # 消费者组 lag（所有分区求和）低于这个值才算健康。

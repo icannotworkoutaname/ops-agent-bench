@@ -8,7 +8,7 @@ from pathlib import Path
 
 import typer
 
-from bench import traffic
+from bench import monitoring, traffic
 from bench.admin_k8s import AdminK8s
 from bench.agent.fake import FakeModel
 from bench.agent.mcp_tools import McpToolSource
@@ -24,6 +24,8 @@ from bench.show import render_run
 app = typer.Typer(no_args_is_help=True, help="ops-agent-bench 命令行")
 traffic_app = typer.Typer(no_args_is_help=True, help="管理 bench namespace 里的流量发生器")
 app.add_typer(traffic_app, name="traffic")
+monitoring_app = typer.Typer(no_args_is_help=True, help="管理 monitoring namespace 里的 Prometheus")
+app.add_typer(monitoring_app, name="monitoring")
 
 
 @app.command()
@@ -181,6 +183,20 @@ def show(
 ) -> None:
     """以人能读的格式打印一次运行的全过程。"""
     typer.echo(render_run(run_dir, full))
+
+
+@monitoring_app.command("up")
+def monitoring_up() -> None:
+    """部署（或更新）集群内的 Prometheus 并等它 Ready。"""
+    monitoring.up(load_env())
+    typer.echo("Prometheus 已就绪")
+
+
+@monitoring_app.command("down")
+def monitoring_down() -> None:
+    """删除 monitoring namespace 和对应的 RBAC。"""
+    monitoring.down(load_env())
+    typer.echo("monitoring 已删除")
 
 
 @traffic_app.command("up")

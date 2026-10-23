@@ -70,6 +70,15 @@ class TrafficConfig:
 
 
 @dataclass(frozen=True)
+class MonitoringConfig:
+    namespace: str
+    name: str
+    port: int
+    image: str
+    retention: str
+
+
+@dataclass(frozen=True)
 class EnvConfig:
     kube_context: str
     music_streaming_repo: Path
@@ -85,6 +94,7 @@ class EnvConfig:
     ingestion_url: str
     query_url: str
     traffic: TrafficConfig
+    monitoring: MonitoringConfig
     manifests: dict[str, str]
 
     def manifest_path(self, key: str) -> Path:
@@ -109,6 +119,7 @@ def load_env() -> EnvConfig:
         ingestion_url=raw["services"]["ingestion_url"],
         query_url=raw["services"]["query_url"],
         traffic=TrafficConfig(**raw["traffic"]),
+        monitoring=MonitoringConfig(**raw["monitoring"]),
         manifests=raw["manifests"],
     )
 

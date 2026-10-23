@@ -29,7 +29,8 @@ serves a query API.
 Clients normally send play events continuously at a low rate.
 
 You can only look, not change anything. Your tools are read-only and can see the namespaces \
-default, kafka and data. Investigate with them, then call submit_diagnosis exactly once to \
+default, kafka and data. You can also query the system's metrics with the promql_query and \
+list_metrics tools. Investigate with them, then call submit_diagnosis exactly once to \
 report your conclusion. Base the diagnosis on evidence you actually observed in tool output, \
 and cite that evidence in the submission.\
 """

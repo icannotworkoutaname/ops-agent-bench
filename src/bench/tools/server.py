@@ -15,6 +15,7 @@ from bench.config import load_env, load_run
 from bench.tools.common import as_tool
 from bench.tools.k8s_read import K8sReader
 from bench.tools.kafka_read import KafkaReader
+from bench.tools.prom_read import PromReader
 
 env = load_env()
 run_cfg = load_run()
@@ -25,6 +26,9 @@ WINDOW = limits["lookback_minutes"]
 
 k8s = K8sReader(env.kube_context, env.agent_visible_namespaces, limits)
 kafka = KafkaReader(env.kube_context, env.kafka)
+prom = PromReader(
+    env.kube_context, env.monitoring.namespace, env.monitoring.name, env.monitoring.port, limits
+)
 
 mcp = MCPServer("ops-readonly")
 NAMESPACES = ", ".join(env.agent_visible_namespaces)
@@ -86,6 +90,32 @@ def get_deployment(namespace: str, name: str) -> str:
 def get_consumer_lag(group: str) -> str:
     """Show the per-partition lag of a Kafka consumer group (current offset, log-end offset, lag)."""
     return kafka.get_consumer_lag(group)
+
+
+@mcp.tool(
+    description=(
+        "Run a PromQL query against the system's Prometheus (service metrics and container "
+        "CPU / memory / throttling metrics). Without range_minutes it is an instant query; "
+        f"with range_minutes (1 to {WINDOW}) it returns the values over that period, "
+        "optionally with a step such as '30s'. "
+        f"Only the last {WINDOW} minutes of data are available: range_minutes plus any [..] "
+        f"range or offset inside the expression must not reach back more than {WINDOW} minutes."
+    )
+)
+@as_tool(max_chars)
+def promql_query(query: str, range_minutes: int | None = None, step: str | None = None) -> str:
+    return prom.promql_query(query, range_minutes, step)
+
+
+@mcp.tool(
+    description=(
+        "Find the names of the metrics available in Prometheus that contain a substring "
+        "(case-insensitive). The number of results is capped."
+    )
+)
+@as_tool(max_chars)
+def list_metrics(match: str) -> str:
+    return prom.list_metrics(match)
 
 
 if __name__ == "__main__":

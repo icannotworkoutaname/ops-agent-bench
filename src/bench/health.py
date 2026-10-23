@@ -99,6 +99,14 @@ def run_health(env: EnvConfig, run_cfg: dict, k8s: AdminK8s) -> list[Check]:
                 lambda group=group: check_consumer_lag(k8s, group, cfg["max_consumer_lag"]),
             )
         )
+    # agent 的 promql_query 依赖它；Prometheus 挂了，agent 会拿到错误而不是数据，结果就不可信
+    mon = env.monitoring
+    checks.append(
+        _safe(
+            f"deployment/{mon.name} (prometheus)",
+            lambda: k8s.deployment_ready(mon.namespace, mon.name),
+        )
+    )
     checks.append(_safe("traffic (写入/查询)", lambda: check_traffic(k8s, cfg)))
     checks.append(_safe("control-plane (认证错误)", lambda: check_control_plane(k8s, cfg)))
     return checks

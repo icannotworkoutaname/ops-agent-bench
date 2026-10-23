@@ -50,15 +50,26 @@ def make_reader(read_log=None) -> K8sReader:
     """不连集群的 K8sReader：用假的 core API 记录被调用的参数。"""
     reader = K8sReader.__new__(K8sReader)
     reader.allowed = ALLOWED
-    reader.limits = {"default_log_tail_lines": 100, "max_log_tail_lines": 300, "max_events": 30}
+    reader.limits = {
+        "default_log_tail_lines": 100,
+        "max_log_tail_lines": 300,
+        "max_events": 30,
+        "lookback_minutes": 10,
+    }
 
     class FakeCore:
         def __init__(self):
             self.calls = []
+            self.since = []
+            self.events = []
 
-        def read_namespaced_pod_log(self, name, namespace, tail_lines, previous):
+        def read_namespaced_pod_log(self, name, namespace, tail_lines, previous, since_seconds):
             self.calls.append((name, namespace, tail_lines, previous))
+            self.since.append(since_seconds)
             return read_log(previous) if read_log else "line"
+
+        def list_namespaced_event(self, namespace):
+            return client.CoreV1EventList(items=self.events)
 
     reader.core = FakeCore()
     return reader
@@ -295,7 +306,49 @@ def event(reason: str, seconds_ago: int):
 
 
 def test_events_are_newest_first_and_limited():
-    out = format_events([event("old", 500), event("new", 5), event("mid", 100)], limit=2)
+    events = [event("older", 300), event("new", 5), event("mid", 100)]
+    out = format_events(events, limit=2, lookback_minutes=10)
     assert out.index("new") < out.index("mid")
-    assert "old" not in out
-    assert "共 3 条" in out
+    assert "older" not in out
+    assert "窗口内还有 1 条更早的未显示" in out
+
+
+# ---------- 回看窗口 W：只返回最近 W 分钟内的数据 ----------
+
+
+def test_events_older_than_the_window_are_dropped():
+    events = [event("stale", 11 * 60), event("fresh", 9 * 60)]
+    out = format_events(events, limit=30, lookback_minutes=10)
+    assert "fresh" in out and "stale" not in out
+
+
+def test_the_window_edge_is_respected():
+    # 显式传入 now：事件时间是相对 NOW 构造的，不能依赖真实时钟，否则在边界上会不稳定
+    assert "edge" in format_events([event("edge", 599)], 30, 10, now=NOW)
+    assert "edge" not in format_events([event("edge", 601)], 30, 10, now=NOW)
+
+
+def test_old_events_are_not_counted_or_hinted_at():
+    # 窗口外有多少条旧事件，不能透露给 agent：不然它知道“更早的地方有东西”
+    out = format_events([event("stale1", 3600), event("stale2", 3700)], 30, 10)
+    assert "stale" not in out and "2" not in out.replace("10", "")
+    assert "最近 10 分钟内" in out
+
+
+def test_event_tool_applies_the_configured_window():
+    reader = make_reader()
+    reader.core.events = [event("stale", 3600), event("fresh", 30)]
+    out = reader.get_events("default")
+    assert "fresh" in out and "stale" not in out
+
+
+def test_logs_are_requested_with_both_since_and_tail():
+    reader = make_reader()
+    reader.get_pod_logs("default", "p", 50, False)
+    assert reader.core.since == [10 * 60]  # 10 分钟 = 600 秒
+    assert [c[2] for c in reader.core.calls] == [50]
+
+
+def test_empty_logs_say_the_window_was_empty():
+    reader = make_reader(read_log=lambda previous: "")
+    assert "最近 10 分钟内没有日志" in reader.get_pod_logs("default", "p", 50, False)

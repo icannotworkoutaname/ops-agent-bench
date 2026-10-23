@@ -11,6 +11,15 @@ class RedisDown(Scenario):
         expected_action="恢复 Redis（把 StatefulSet 副本数调回 1）",
     )
 
+    # query-service 连不上 Redis 时的日志，以及 Redis Pod 被停掉时的事件。
+    # 不能用 "redis-master-0" 这样的名字：健康环境里 list_pods 也会列出它
+    signatures = (
+        "Cannot reconnect to [redis-master",
+        "ConnectionWatchdog",
+        "Stopping container redis",
+        "No matching pods found",
+    )
+
     def inject(self) -> None:
         r = self.env.redis
         self.k8s.scale_statefulset(r.namespace, r.name, 0)

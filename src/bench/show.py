@@ -65,6 +65,11 @@ def render_run(run_dir: Path, full: bool = False) -> str:
     # ---------- 环境 ----------
     out.append("\n----- 环境 -----")
     out.append(f"运行前健康检查: {_health_line(env.get('health_before'))}")
+    if env.get("cooldown"):
+        cd = env["cooldown"]
+        out.append(f"冷却期: {'通过' if cd['ok'] else '未通过'} — {cd['detail']}")
+    elif "cooldown" in env:
+        out.append("冷却期: 已跳过（仅限开发调试）")
     if "events_cleared_in" in env:
         out.append(f"已清理旧事件的 namespace: {', '.join(env['events_cleared_in'])}")
     if "verify_injected" in env:
@@ -74,6 +79,11 @@ def render_run(run_dir: Path, full: bool = False) -> str:
         v = env["verify_restored"]
         out.append(f"恢复: {'成功' if v['ok'] else '失败'} — {v['detail']}")
         out.append(f"恢复后健康检查: {_health_line(env.get('health_after'))}")
+    if env.get("contamination"):
+        out.append("【疑似跨运行污染】工具返回的内容里出现了不该出现的字符串:")
+        for h in env["contamination"]:
+            origin = f"，来自 {h['from_scenario']}" if h.get("from_scenario") else ""
+            out.append(f"  - 第 {h['step']} 步 {h['tool']}: [{h['kind']}] {h['needle']!r}{origin}")
     timeline = env.get("timeline") or []
     if timeline:
         out.append("各阶段耗时（距上一个阶段）:")

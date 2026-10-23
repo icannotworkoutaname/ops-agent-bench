@@ -9,6 +9,7 @@ import pytest
 
 from bench.agent.fake import FakeModel
 from bench.config import load_env, load_run
+from bench.cooldown import CooldownResult
 from bench.pricing import build_usage_report, is_peak, pricing_missing, request_cost
 from bench.runlog import RunLog, cumulative_usage, read_transcript
 from bench.runner import RunDeps, execute_run, preflight
@@ -260,8 +261,8 @@ class FakeScenario(Scenario):
 class FakeToolSource:
     """代替 MCP：同样是 async with，对外提供 definitions / call。"""
 
-    def __init__(self, calls, fail_to_start=False):
-        self.calls, self.fail_to_start = calls, fail_to_start
+    def __init__(self, calls, fail_to_start=False, payload=None):
+        self.calls, self.fail_to_start, self.payload = calls, fail_to_start, payload
 
     async def __aenter__(self):
         if self.fail_to_start:
@@ -276,10 +277,20 @@ class FakeToolSource:
         return [{"name": "list_pods", "description": "d", "input_schema": {"type": "object"}}]
 
     async def call(self, name, arguments):
+        if self.payload:  # 让所有工具都返回指定内容，用来模拟“环境里有别的场景的痕迹”
+            return self.payload, False
         return f"result of {name} {arguments}", False
 
 
-def run_once(tmp_path, scenario_kwargs=None, healthy=True, tools_fail=False, runs_dir=None):
+def run_once(
+    tmp_path,
+    scenario_kwargs=None,
+    healthy=True,
+    tools_fail=False,
+    runs_dir=None,
+    cooldown=None,
+    payload=None,
+):
     calls: list[str] = []
     health = [
         (True, [{"name": "x", "ok": True, "detail": ""}]),
@@ -299,11 +310,12 @@ def run_once(tmp_path, scenario_kwargs=None, healthy=True, tools_fail=False, run
         scenario=scenario,
         model_key="deepseek-flash",
         model=FakeModel(),
-        tool_source=lambda: FakeToolSource(calls, tools_fail),
+        tool_source=lambda: FakeToolSource(calls, tools_fail, payload),
         check_health=check_health,
         clear_events=lambda: calls.append("clear_events") or ["default"],
         log=RunLog(runs_dir or tmp_path, scenario.id, "deepseek-flash"),
         fake=True,
+        cooldown=(lambda: cooldown(calls)) if cooldown else None,
     )
     outcome = asyncio.run(execute_run(deps))
     return outcome, calls
@@ -351,6 +363,75 @@ def test_happy_path_order_and_files(tmp_path):
         and meta["git"]["ops_agent_bench"]["commit"]
     )
     assert "run" in meta["config_snapshot"] and "env" in meta["config_snapshot"]
+
+
+def passing_cooldown(calls):
+    calls.append("cooldown")
+    return CooldownResult(
+        ok=True,
+        waited_seconds=612.0,
+        checks=16,
+        resets=[],
+        healthy=True,
+        last_checks=[{"name": "x", "ok": True, "detail": ""}],
+        detail="连续健康 600s",
+    )
+
+
+def failing_cooldown(calls):
+    calls.append("cooldown")
+    return CooldownResult(
+        ok=False,
+        waited_seconds=1800.0,
+        checks=40,
+        resets=[{"at_seconds": 5, "reason": "write fail"}],
+        healthy=False,
+        last_checks=[{"name": "x", "ok": False, "detail": "write fail"}],
+        detail="等了 1800s 仍没有连续健康",
+    )
+
+
+def test_cooldown_replaces_the_plain_health_check_before_injection(tmp_path):
+    outcome, calls = run_once(tmp_path, cooldown=passing_cooldown)
+    assert calls[:3] == ["cooldown", "clear_events", "inject"]
+    assert calls.count("health") == 1  # 只剩恢复之后的那一次
+    env = json.loads((outcome.run_dir / "env.json").read_text())
+    assert env["cooldown"]["ok"] and env["cooldown"]["checks"] == 16
+    assert outcome.valid
+
+
+def test_failed_cooldown_means_no_injection_and_an_invalid_run(tmp_path):
+    outcome, calls = run_once(tmp_path, cooldown=failing_cooldown)
+    assert calls == ["cooldown"]  # 没清事件、没注入、也没有要恢复的东西
+    assert outcome.status == "invalid" and not outcome.valid
+    assert "冷却期没有通过" in outcome.reason
+
+
+def test_skipped_cooldown_is_recorded_as_skipped(tmp_path):
+    outcome, _ = run_once(tmp_path)
+    env = json.loads((outcome.run_dir / "env.json").read_text())
+    assert env["cooldown"] is None
+
+
+def test_foreign_scenario_traces_mark_the_run_as_suspected_contamination(tmp_path):
+    leaked = 'Warning Failed: secret "postgres-credentials" not found'
+    outcome, _ = run_once(tmp_path, payload=leaked)
+    assert outcome.contaminated and not outcome.valid and outcome.score is None
+    assert "疑似污染" in outcome.reason
+    score_file = json.loads((outcome.run_dir / "score.json").read_text())
+    assert score_file["valid"] is False
+    env = json.loads((outcome.run_dir / "env.json").read_text())
+    assert env["contamination"][0]["from_scenario"] == "missing-pg-secret"
+    # 即使被判污染，环境照样恢复、记录照样完整
+    assert outcome.restore_ok and (outcome.run_dir / "usage.json").exists()
+    assert "疑似跨运行污染" in render_run(outcome.run_dir)
+
+
+def test_clean_run_has_no_contamination_record(tmp_path):
+    outcome, _ = run_once(tmp_path)
+    assert not outcome.contaminated and outcome.valid
+    env = json.loads((outcome.run_dir / "env.json").read_text())
+    assert env["contamination"] == []
 
 
 def test_symptom_not_observed_invalidates_the_run_but_still_restores(tmp_path):

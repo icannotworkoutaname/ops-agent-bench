@@ -17,8 +17,11 @@ from bench.tools.k8s_read import K8sReader
 from bench.tools.kafka_read import KafkaReader
 
 env = load_env()
-limits = load_run()["tools"]
+run_cfg = load_run()
+# 回看窗口 W 对所有和时间有关的工具生效（见 config/run.yaml 的 lookback_minutes）
+limits = {**run_cfg["tools"], "lookback_minutes": run_cfg["lookback_minutes"]}
 max_chars = limits["max_output_chars"]
+WINDOW = limits["lookback_minutes"]
 
 k8s = K8sReader(env.kube_context, env.agent_visible_namespaces, limits)
 kafka = KafkaReader(env.kube_context, env.kafka)
@@ -46,19 +49,26 @@ def describe_pod(namespace: str, name: str) -> str:
     return k8s.describe_pod(namespace, name)
 
 
-@mcp.tool()
+@mcp.tool(
+    description=(
+        "Return the last `tail` log lines of a pod (capped by a server-side maximum), "
+        f"restricted to the last {WINDOW} minutes. "
+        "Set previous=true to read the log of the previous, terminated container instance "
+        "(useful when the container keeps restarting)."
+    )
+)
 @as_tool(max_chars)
 def get_pod_logs(namespace: str, name: str, tail: int = 100, previous: bool = False) -> str:
-    """Return the last `tail` log lines of a pod (capped by a server-side maximum).
-    Set previous=true to read the log of the previous, terminated container instance
-    (useful when the container keeps restarting)."""
     return k8s.get_pod_logs(namespace, name, tail, previous)
 
 
-@mcp.tool()
+@mcp.tool(
+    description=(
+        f"Return the Kubernetes events of the last {WINDOW} minutes in a namespace, newest first."
+    )
+)
 @as_tool(max_chars)
 def get_events(namespace: str) -> str:
-    """Return the most recent Kubernetes events in a namespace, newest first."""
     return k8s.get_events(namespace)
 
 

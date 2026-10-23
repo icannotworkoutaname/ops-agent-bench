@@ -18,8 +18,11 @@ from pathlib import Path
 from bench.agent.loop import AgentResult, ModelClient, run_agent
 from bench.agent.prompts import SYSTEM_PROMPT, TASK_PROMPT
 from bench.config import EnvConfig, load_raw
+from bench.contamination import find_contamination
+from bench.cooldown import CooldownResult
 from bench.pricing import build_usage_report, is_peak, pricing_missing
 from bench.runlog import RunLog, cumulative_usage, git_info
+from bench.scenarios import SCENARIOS
 from bench.scenarios.base import Scenario
 from bench.scoring import score
 
@@ -36,6 +39,8 @@ class RunDeps:
     clear_events: Callable[[], list[str]]
     log: RunLog
     fake: bool
+    # 冷却期：返回 CooldownResult。None 表示跳过（只用于假模型的开发调试）
+    cooldown: Callable[[], CooldownResult] | None = None
 
 
 @dataclass
@@ -47,6 +52,7 @@ class RunOutcome:
     score: dict | None
     run_dir: Path
     cost: float | None
+    contaminated: bool = False
 
 
 def preflight(
@@ -125,12 +131,29 @@ async def execute_run(deps: RunDeps) -> RunOutcome:
     log.write_json("meta.json", meta(finished=False))
 
     mark("start")
-    healthy, checks = deps.check_health()
+    not_ready_reason = "运行前环境不健康，没有注入"
+    if deps.cooldown is not None:
+        # 冷却期：注入前环境必须连续 W 分钟健康，这样回看窗口里不会有上一次运行的痕迹
+        cooldown = deps.cooldown()
+        mark("cooldown_done")
+        env_record["cooldown"] = {
+            "ok": cooldown.ok,
+            "waited_seconds": round(cooldown.waited_seconds, 1),
+            "checks": cooldown.checks,
+            "resets": cooldown.resets,
+            "detail": cooldown.detail,
+        }
+        healthy, checks = cooldown.ok, cooldown.last_checks
+        not_ready_reason = f"冷却期没有通过，没有注入: {cooldown.detail}"
+    else:
+        # 跳过冷却期只允许用在假模型的开发调试里（见 cli.py），记录里如实写明
+        env_record["cooldown"] = None
+        healthy, checks = deps.check_health()
     mark("health_before_done")
     env_record["health_before"] = _health_record(healthy, checks)
     if not healthy:
         # 环境一开始就不健康：不注入，也没有可“恢复”的东西
-        status, reason = "invalid", "运行前环境不健康，没有注入"
+        status, reason = "invalid", not_ready_reason
         env_record["note"] = "未注入"
     else:
         # 清掉旧事件，避免上一次运行的痕迹漏进这一次 agent 能看到的 get_events（隔离原则 2）
@@ -177,6 +200,20 @@ async def execute_run(deps: RunDeps) -> RunOutcome:
             env_record["health_after"] = _health_record(after_ok, after_checks)
             restore_ok = restored_ok and after_ok
 
+    # ---- 跨运行污染的事后检查 ----
+    # 扫描这次运行里所有工具返回的内容，发现其他场景的特征字符串、场景 id、测试框架的名字，
+    # 就标记为“疑似污染”：不计入准确率，报告里单独列出（见 contamination.py）
+    contamination: list[dict] = []
+    if agent_result is not None:
+        calls = [e for e in log.events if e["type"] == "tool_call"]
+        signatures = {sid: cls.signatures for sid, cls in SCENARIOS.items()}
+        contamination = find_contamination(calls, scenario.id, signatures)
+        if contamination and valid:
+            valid = False
+            seen = sorted({f"{h['kind']}:{h['needle']}" for h in contamination})
+            reason += f"；疑似污染（不计入准确率）: {', '.join(seen)}"
+    env_record["contamination"] = contamination
+
     # ---- 写记录 ----
     usage = build_usage_report(log.events, entry, cfg["billing"], deps.fake)
     diagnosis = agent_result.diagnosis if agent_result else None
@@ -206,4 +243,5 @@ async def execute_run(deps: RunDeps) -> RunOutcome:
         score=run_score,
         run_dir=log.path,
         cost=usage["total"]["cost"],
+        contaminated=bool(contamination),
     )

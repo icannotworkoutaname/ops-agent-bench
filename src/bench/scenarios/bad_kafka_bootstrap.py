@@ -23,6 +23,9 @@ class BadKafkaBootstrap(Scenario):
         expected_action="把 stream-processor 的 KAFKA_BOOTSTRAP_SERVERS 改回正确地址",
     )
 
+    # 错误地址本身，以及 Kafka 客户端解析不了它时抛的异常
+    signatures = ("kafka-0.kafka.svc", "No resolvable bootstrap urls")
+
     @property
     def _dep(self):
         return next(d for d in self.env.deployments if d.name == "stream-processor")

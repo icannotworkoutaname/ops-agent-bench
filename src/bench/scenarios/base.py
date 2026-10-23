@@ -53,6 +53,10 @@ def wait_until(check: Callable[[], Outcome], timeout: float, interval: float = 3
 class Scenario(ABC):
     id: str
     ground_truth: GroundTruth
+    # 本场景特有的错误信息的特征字符串，用来做“跨运行污染”检查：
+    # 检查别的场景的运行时，如果工具返回的内容里出现了这些字符串，说明本场景的痕迹漏进去了。
+    # 要写得足够具体，不能是在健康环境里也会出现的普通词（比如服务名本身）。
+    signatures: tuple[str, ...] = ()
 
     def __init__(self, env: EnvConfig, run_cfg: dict, k8s: AdminK8s):
         self.env = env

@@ -11,6 +11,9 @@ class MissingPgSecret(Scenario):
         expected_action="重建 default 里的 postgres-credentials Secret（从 data 里的源 Secret 复制）",
     )
 
+    # Pod 卡住时的状态，以及 kubelet 报的缺 Secret 的原因
+    signatures = ('secret "postgres-credentials" not found', "CreateContainerConfigError")
+
     @property
     def _dep(self):
         return next(d for d in self.env.deployments if d.name == "query-service")

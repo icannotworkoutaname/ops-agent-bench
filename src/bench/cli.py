@@ -14,6 +14,7 @@ from bench.agent.fake import FakeModel
 from bench.agent.mcp_tools import McpToolSource
 from bench.agent.model import AnthropicModel
 from bench.config import load_dotenv, load_env, load_run
+from bench.cooldown import wait_for_cooldown
 from bench.health import is_healthy, run_health
 from bench.runlog import RUNS_DIR, RunLog, cumulative_usage
 from bench.runner import RunDeps, execute_run, preflight
@@ -87,6 +88,9 @@ def run(
     model: str = typer.Option(None, help="run.yaml 里的模型条目名，默认用配置里的 default_model"),
     fake: bool = typer.Option(False, "--fake", help="用假模型跑完整链路，不联网、不花钱"),
     allow_peak: bool = typer.Option(False, "--allow-peak", help="允许在高峰时段发起真实运行"),
+    no_cooldown: bool = typer.Option(
+        False, "--no-cooldown", help="跳过冷却期（只能和 --fake 一起用，用于开发调试）"
+    ),
 ) -> None:
     """完整跑一次：检查健康 -> 注入 -> 确认症状 -> agent -> 恢复 -> 确认健康 -> 打分。"""
     scenario, env, run_cfg = _get_scenario(scenario_id)
@@ -94,6 +98,9 @@ def run(
     load_dotenv()
 
     problems = preflight(run_cfg, model_key, fake, allow_peak, RUNS_DIR, datetime.now(UTC))
+    if no_cooldown and not fake:
+        # 真实运行必须经过冷却期，否则上一次运行的痕迹可能出现在回看窗口里
+        problems.append("--no-cooldown 只能和 --fake 一起用")
     if problems:
         typer.echo("拒绝运行:")
         for p in problems:
@@ -116,6 +123,17 @@ def run(
         checks = run_health(env, run_cfg, k8s)
         return is_healthy(checks), [asdict(c) for c in checks]
 
+    cooldown_cfg = run_cfg["cooldown"]
+
+    def cooldown():
+        return wait_for_cooldown(
+            check_health,
+            window_seconds=run_cfg["lookback_minutes"] * 60,
+            interval_seconds=cooldown_cfg["check_interval_seconds"],
+            max_wait_seconds=cooldown_cfg["max_wait_minutes"] * 60,
+            on_progress=typer.echo,
+        )
+
     deps = RunDeps(
         env=env,
         run_cfg=run_cfg,
@@ -127,11 +145,15 @@ def run(
         clear_events=lambda: k8s.clear_events(env.agent_visible_namespaces),
         log=RunLog(RUNS_DIR, scenario_id, model_key),
         fake=fake,
+        cooldown=None if no_cooldown else cooldown,
     )
     typer.echo(f"运行记录目录: {deps.log.path}")
     outcome = asyncio.run(execute_run(deps))
 
-    typer.echo(f"\n状态: {outcome.status}    有效: {outcome.valid}")
+    typer.echo(
+        f"\n状态: {outcome.status}    有效: {outcome.valid}"
+        + ("    【疑似跨运行污染】" if outcome.contaminated else "")
+    )
     typer.echo(f"原因: {outcome.reason}")
     if outcome.score:
         typer.echo(

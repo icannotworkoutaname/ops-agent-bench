@@ -9,6 +9,8 @@
 绝不去读取 Secret 的内容（这里甚至不调用任何 Secret 相关的 API）。
 """
 
+from datetime import UTC, datetime, timedelta
+
 from kubernetes import client, config
 from kubernetes.client import ApiException
 
@@ -91,15 +93,29 @@ def format_pod_describe(pod) -> str:
     return "\n".join(lines)
 
 
-def format_events(events: list, limit: int) -> str:
-    if not events:
-        return "(该 namespace 里没有事件)"
+def format_events(
+    events: list, limit: int, lookback_minutes: int, now: datetime | None = None
+) -> str:
+    """只显示最后一次发生时间在回看窗口内的事件。
+
+    为什么要窗口：k8s 默认把事件保留约 1 小时，上一次运行的痕迹（比如 Killing、OOMKilled）
+    会留到下一次运行里，被 agent 看到会让结果不可信（跨运行污染）。
+    被窗口过滤掉的事件**不告诉 agent 有多少条**，免得它知道“更早的地方有东西”。
+    """
 
     def when(e):
         return e.last_timestamp or e.event_time or e.metadata.creation_timestamp
 
-    newest_first = sorted(events, key=when, reverse=True)[:limit]
-    lines = [f"最近 {len(newest_first)} 条事件（共 {len(events)} 条，新的在前）:"]
+    cutoff = (now or datetime.now(UTC)) - timedelta(minutes=lookback_minutes)
+    recent = [e for e in events if when(e) >= cutoff]
+    if not recent:
+        return f"(最近 {lookback_minutes} 分钟内该 namespace 没有事件)"
+
+    newest_first = sorted(recent, key=when, reverse=True)[:limit]
+    header = f"最近 {lookback_minutes} 分钟内的事件，显示 {len(newest_first)} 条（新的在前）"
+    if len(recent) > len(newest_first):
+        header += f"，窗口内还有 {len(recent) - len(newest_first)} 条更早的未显示"
+    lines = [header + ":"]
     for e in newest_first:
         obj = f"{e.involved_object.kind}/{e.involved_object.name}"
         count = f" x{e.count}" if e.count and e.count > 1 else ""
@@ -206,20 +222,23 @@ class K8sReader:
         if tail < 1:
             raise ToolError("tail 必须 ≥ 1")
         tail = min(tail, max_tail)  # 模型要求的行数超过上限时，按上限给
+        window = self.limits["lookback_minutes"]
         try:
+            # tail 限制的是行数，不是时间：流量低的时候，旧错误仍会留在最后几百行里。
+            # 所以同时加上 since_seconds，两个限制取交集
             text = self.core.read_namespaced_pod_log(
-                name, namespace, tail_lines=tail, previous=previous
+                name, namespace, tail_lines=tail, previous=previous, since_seconds=window * 60
             )
         except ApiException as e:
             if e.status == 400 and previous:
                 raise ToolError("没有上一次终止的容器日志（这个容器还没有重启过）") from e
             raise
-        return text if text else "(日志为空)"
+        return text if text else f"(最近 {window} 分钟内没有日志)"
 
     def get_events(self, namespace: str) -> str:
         check_namespace(namespace, self.allowed)
         events = self.core.list_namespaced_event(namespace).items
-        return format_events(events, self.limits["max_events"])
+        return format_events(events, self.limits["max_events"], self.limits["lookback_minutes"])
 
     def get_deployment(self, namespace: str, name: str) -> str:
         check_namespace(namespace, self.allowed)

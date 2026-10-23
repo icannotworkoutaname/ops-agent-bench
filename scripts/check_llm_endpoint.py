@@ -58,9 +58,7 @@ def run_tools(resp) -> list[dict]:
     for block in resp.content:
         if block.type == "tool_use":
             value = FAKE_NUMBERS.get(block.input.get("name"), -1)
-            results.append(
-                {"type": "tool_result", "tool_use_id": block.id, "content": str(value)}
-            )
+            results.append({"type": "tool_result", "tool_use_id": block.id, "content": str(value)})
     return results
 
 

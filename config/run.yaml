@@ -9,6 +9,34 @@ scenario:
   # bad-kafka-bootstrap 的症状：lag 至少比注入后第一次采样多出这么多才算“在上涨”
   min_lag_growth: 30
 
+agent:
+  default_model: deepseek-flash
+  # 一次运行最多发起多少次模型请求（一次请求 = 一步）
+  max_steps: 25
+  # 一次运行的最长时间（秒）。到点后不再发起新的请求
+  max_seconds: 600
+  # 一次运行累计的 token 上限 = 每步 (input + cache_read + output) 之和。
+  # 上下文会随步数增长，所以累计值比单次请求大得多；这里是一个粗略的防失控保险
+  max_total_tokens: 500000
+  # 单次请求允许模型输出的最大 token 数。thinking 也算在里面，设太小会把回答截断
+  max_output_tokens: 4096
+  # 单次请求的网络超时（秒）
+  request_timeout_seconds: 120
+  # 模型没有调用任何工具就结束回复时，最多提醒几次“请用 submit_diagnosis 提交”
+  max_nudges: 2
+
+# 模型条目。第 1 阶段只用 deepseek-flash；deepseek-v4-pro 留到第 4 阶段对比。
+# 单价（pricing）等 M6 做费用核算时，由仓库所有者到官方定价页核对后再填。
+models:
+  deepseek-flash:
+    model: deepseek-flash
+    base_url: https://api.deepseek.com/anthropic
+    api_key_env: DEEPSEEK_API_KEY
+  deepseek-v4-pro:
+    model: deepseek-v4-pro
+    base_url: https://api.deepseek.com/anthropic
+    api_key_env: DEEPSEEK_API_KEY
+
 tools:
   # 单个工具返回给模型的最大字符数，超出会被截断并注明原长度
   max_output_chars: 6000

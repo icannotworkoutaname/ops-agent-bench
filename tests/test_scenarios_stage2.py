@@ -78,9 +78,13 @@ def test_signatures_do_not_contain_scenario_ids_or_look_like_healthy_output():
 def test_scenarios_that_need_parameters_have_them_in_the_config():
     params = load_run()["scenario_params"]
     assert {"min_lag_growth"} <= set(params["sp-pod-killed"])
-    assert {"cpu_limit", "cpu_request", "traffic_rate", "min_lag_growth"} <= set(
-        params["sp-cpu-throttle"]
-    )
+    assert {
+        "cpu_limit",
+        "cpu_request",
+        "traffic_rate",
+        "min_lag_growth",
+        "min_throttle_ratio",
+    } <= set(params["sp-cpu-throttle"])
     assert {"memory_limit"} <= set(params["sp-oom"])
     assert {"min_lag_growth"} <= set(params["postgres-down"])
     assert {"bad_path", "min_running_seconds"} <= set(params["query-probe-misconfig"])

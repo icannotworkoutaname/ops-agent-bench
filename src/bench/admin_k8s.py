@@ -70,7 +70,11 @@ class AdminK8s:
         return False, f"phase {pod.status.phase}, no Ready condition"
 
     def exec_in_pod(self, namespace: str, pod: str, container: str, command: list[str]) -> str:
-        """在 Pod 里执行一条固定命令并返回 stdout。command 由调用方以列表形式给出，不经过 shell。"""
+        """在 Pod 里执行一条固定命令并返回 stdout。command 由调用方以列表形式给出，不经过 shell。
+
+        带超时：连接卡住时到点就返回（可能是不完整的输出，由调用方当作“检查失败”处理），
+        而不是让整个运行无限期挂起。
+        """
         return stream(
             self.core.connect_get_namespaced_pod_exec,
             pod,
@@ -81,6 +85,7 @@ class AdminK8s:
             stdin=False,
             stdout=True,
             tty=False,
+            _request_timeout=self.env.kafka.exec_timeout_seconds,
         )
 
     def consumer_group_describe(self, group: str) -> str:
@@ -155,6 +160,16 @@ class AdminK8s:
 
     def scale_statefulset(self, namespace: str, name: str, replicas: int) -> None:
         kubectl(self.env, "scale", "statefulset", name, "-n", namespace, f"--replicas={replicas}")
+
+    def clear_events(self, namespaces: list[str]) -> list[str]:
+        """删除这些 namespace 里的 Event 对象（只是临时的诊断记录，不是业务数据）。
+
+        每次运行注入之前清一次：k8s 的事件默认保留约 1 小时，不清的话，上一次运行的
+        痕迹（比如“secret not found”）会通过 get_events 漏给下一次运行的 agent。
+        """
+        for ns in namespaces:
+            kubectl(self.env, "delete", "events", "--all", "-n", ns)
+        return list(namespaces)
 
     def scale_deployment(self, namespace: str, name: str, replicas: int) -> None:
         kubectl(self.env, "scale", "deployment", name, "-n", namespace, f"--replicas={replicas}")

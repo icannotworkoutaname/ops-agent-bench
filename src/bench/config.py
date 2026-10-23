@@ -3,6 +3,7 @@
 用几个很小的 dataclass 把配置的形状写清楚，读代码的人一眼能看出有哪些字段。
 """
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -12,8 +13,29 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def _load_yaml(name: str) -> dict:
+def load_raw(name: str) -> dict:
+    """把 config/ 下的一个 yaml 原样读成字典（也用来在运行记录里保存配置快照）。"""
     return yaml.safe_load((ROOT / "config" / name).read_text(encoding="utf-8"))
+
+
+_load_yaml = load_raw
+
+
+def load_dotenv() -> None:
+    """读取仓库根目录的 .env，把 KEY=VALUE 放进环境变量（已有的不覆盖）。
+
+    手写而不是装 python-dotenv，少一个依赖。只在需要 API key 的命令里调用；
+    值不会被打印或写进任何日志。
+    """
+    path = ROOT / ".env"
+    if not path.exists():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip())
 
 
 @dataclass(frozen=True)
@@ -29,6 +51,8 @@ class KafkaConfig:
     container: str
     consumer_groups_script: str
     bootstrap_server: str
+    # 在 Kafka Pod 里 exec 命令的最长等待时间；没有它的话，连接卡住会无限期等下去
+    exec_timeout_seconds: int
 
 
 @dataclass(frozen=True)

@@ -74,5 +74,6 @@ class KafkaReader:
             stdin=False,
             stdout=True,
             tty=False,
+            _request_timeout=self.kafka.exec_timeout_seconds,
         )
         return format_lag(group, output)

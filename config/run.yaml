@@ -25,17 +25,35 @@ agent:
   # 模型没有调用任何工具就结束回复时，最多提醒几次“请用 submit_diagnosis 提交”
   max_nudges: 2
 
+# 费用与限额。标注“待填”的值必须由仓库所有者到官方定价页核对后填写；
+# 只要有任何一项是 null，bench run 就拒绝发起真实运行（没有价格就没法控制预算）。
+billing:
+  currency: null # 待填：计费币种，如 CNY / USD。预算和单价都用这个币种
+  budget: null # 待填：runs/ 下累计费用的上限；超过就拒绝再发起新的运行
+  max_real_runs: 15 # 第 1 阶段真实 agent 运行总数上限（stage-1.md）
+  # 高峰时段：工作日（周一到周五），UTC。草稿值，待核对官方定价页。
+  # 窗口左闭右开，按每次请求的发出时间判断。
+  peak:
+    weekdays_only: true
+    windows_utc: [["01:00", "04:00"], ["06:00", "10:00"]]
+
 # 模型条目。第 1 阶段只用 deepseek-flash；deepseek-v4-pro 留到第 4 阶段对比。
-# 单价（pricing）等 M6 做费用核算时，由仓库所有者到官方定价页核对后再填。
+# pricing 的单位是“每百万 token”，分高峰 / 非高峰，每档分缓存命中输入 / 未命中输入 / 输出。
 models:
   deepseek-flash:
     model: deepseek-flash
     base_url: https://api.deepseek.com/anthropic
     api_key_env: DEEPSEEK_API_KEY
+    pricing: # 待填
+      peak: {input_cache_miss: null, input_cache_hit: null, output: null}
+      offpeak: {input_cache_miss: null, input_cache_hit: null, output: null}
   deepseek-v4-pro:
     model: deepseek-v4-pro
     base_url: https://api.deepseek.com/anthropic
     api_key_env: DEEPSEEK_API_KEY
+    pricing: # 待填（第 4 阶段才用）
+      peak: {input_cache_miss: null, input_cache_hit: null, output: null}
+      offpeak: {input_cache_miss: null, input_cache_hit: null, output: null}
 
 tools:
   # 单个工具返回给模型的最大字符数，超出会被截断并注明原长度

@@ -213,6 +213,7 @@ KAFKA = KafkaConfig(
     container="kafka",
     consumer_groups_script="/opt/bitnami/kafka/bin/kafka-consumer-groups.sh",
     bootstrap_server="localhost:9092",
+    exec_timeout_seconds=30,
 )
 
 

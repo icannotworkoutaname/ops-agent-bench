@@ -76,7 +76,7 @@ def preflight(
     if not os.environ.get(entry["api_key_env"]):
         problems.append(f"环境变量 {entry['api_key_env']} 没有设置（应写在 .env 里）")
 
-    used = cumulative_usage(runs_dir)
+    used = cumulative_usage(runs_dir, run_cfg.get("stage"))
     if used["real_runs"] >= billing["max_real_runs"]:
         problems.append(
             f"真实运行次数已达上限 {billing['max_real_runs']}（已用 {used['real_runs']} 次）"
@@ -112,6 +112,7 @@ async def execute_run(deps: RunDeps) -> RunOutcome:
     def meta(finished: bool) -> dict:
         return {
             "run_id": log.path.name,
+            "stage": cfg.get("stage", 1),
             "scenario": scenario.id,
             "model_key": deps.model_key,
             "model_name": entry["model"],
@@ -215,7 +216,7 @@ async def execute_run(deps: RunDeps) -> RunOutcome:
     env_record["contamination"] = contamination
 
     # ---- 写记录 ----
-    usage = build_usage_report(log.events, entry, cfg["billing"], deps.fake)
+    usage = build_usage_report(log.events, entry, cfg["billing"], deps.fake, cfg.get("stage", 1))
     diagnosis = agent_result.diagnosis if agent_result else None
     run_score = score(diagnosis, scenario.ground_truth) if valid else None
 

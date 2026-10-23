@@ -66,13 +66,19 @@ def read_transcript(run_dir: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
 
 
-def cumulative_usage(runs_dir: Path) -> dict:
-    """runs/ 下所有真实运行（不含假模型）的累计费用和次数，用来做预算和次数上限的检查。"""
+def cumulative_usage(runs_dir: Path, stage: int | None = None) -> dict:
+    """runs/ 下所有真实运行（不含假模型）的累计费用和次数，用来做预算和次数上限的检查。
+
+    给了 stage 就只统计属于该阶段的运行：每个阶段有自己的次数上限和预算，
+    第 1 阶段的记录没有 stage 字段，按第 1 阶段算。
+    """
     cost, count = 0.0, 0
     if runs_dir.exists():
         for usage_file in sorted(runs_dir.glob("*/usage.json")):
             usage = json.loads(usage_file.read_text(encoding="utf-8"))
             if usage.get("fake"):
+                continue
+            if stage is not None and usage.get("stage", 1) != stage:
                 continue
             cost += usage["total"].get("cost") or 0.0
             # 只有真的向模型发过请求的运行才算一次“真实 agent 运行”；

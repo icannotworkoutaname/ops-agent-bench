@@ -61,7 +61,9 @@ def request_cost(usage: dict, peak: bool, pricing: dict) -> float:
     ) / 1_000_000
 
 
-def build_usage_report(events: list[dict], model_entry: dict, billing: dict, fake: bool) -> dict:
+def build_usage_report(
+    events: list[dict], model_entry: dict, billing: dict, fake: bool, stage: int = 1
+) -> dict:
     """把一次运行的事件整理成 usage.json：每步的原始 usage + 时段 + 费用，以及总计。
 
     假模型的运行不计费（cost 为 None），也不影响累计费用。
@@ -93,6 +95,7 @@ def build_usage_report(events: list[dict], model_entry: dict, billing: dict, fak
                 }
             )
     return {
+        "stage": stage,
         "fake": fake,
         "currency": None if fake else billing.get("currency"),
         "steps": steps,

@@ -30,7 +30,13 @@ from bench.config import load_dotenv, load_env, load_run
 from bench.cooldown import wait_for_cooldown
 from bench.health import is_healthy, run_health
 from bench.report import build_report
-from bench.runlog import RUNS_DIR, RunLog, cumulative_usage, read_transcript
+from bench.runlog import (
+    RUNS_DIR,
+    RunLog,
+    cumulative_usage,
+    read_transcript,
+    recover_interrupted_runs,
+)
 from bench.runner import RunDeps, execute_run, preflight
 from bench.scenarios import SCENARIOS
 from bench.show import render_run
@@ -134,6 +140,12 @@ def restore(scenario_id: str) -> None:
     raise typer.Exit(0 if outcome.ok else 1)
 
 
+def _recover_interrupted(run_cfg: dict) -> None:
+    """上次被中途杀掉的运行如果已经花了 API 费用，先补录进累计统计，预算保护才不会少算。"""
+    for name in recover_interrupted_runs(RUNS_DIR, run_cfg):
+        typer.echo(f"已补录上次被中断的运行的费用: {name}（标记为无效）")
+
+
 def build_run_deps(scenario, env, run_cfg, model_key, fake, no_cooldown) -> RunDeps:
     """组装一次运行需要的全部依赖。`bench run` 和批量运行器共用，保证两者做的事完全一样。"""
     k8s = scenario.k8s
@@ -192,6 +204,7 @@ def run(
     scenario, env, run_cfg = _get_scenario(scenario_id)
     model_key = model or run_cfg["agent"]["default_model"]
     load_dotenv()
+    _recover_interrupted(run_cfg)
 
     problems = preflight(run_cfg, model_key, fake, allow_peak, RUNS_DIR, datetime.now(UTC))
     if no_cooldown and not fake:
@@ -371,6 +384,7 @@ def batch_run(
     """创建一个批次并开始运行。"""
     env, run_cfg = load_env(), load_run()
     load_dotenv()
+    _recover_interrupted(run_cfg)
     ids = list(SCENARIOS) if scenarios == "all" else [s.strip() for s in scenarios.split(",")]
     unknown = [s for s in ids if s not in SCENARIOS]
     if unknown:
@@ -420,6 +434,7 @@ def batch_resume(batch_id: str) -> None:
     """续跑一个被中断的批次：跳过已完成的运行，继续按原计划执行。"""
     env, run_cfg = load_env(), load_run()
     load_dotenv()
+    _recover_interrupted(run_cfg)
     store = BatchStore.open(BATCHES_DIR, batch_id)
     plan = store.plan
     if plan["model_key"] not in run_cfg["models"]:

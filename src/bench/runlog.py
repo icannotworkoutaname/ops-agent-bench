@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from bench.config import ROOT
+from bench.pricing import build_usage_report
 
 RUNS_DIR = ROOT / "runs"
 
@@ -57,6 +58,62 @@ class RunLog:
         self.events.append(event)
         with (self.path / "transcript.jsonl").open("a", encoding="utf-8") as f:
             f.write(json.dumps(event, ensure_ascii=False, default=str) + "\n")
+
+
+def recover_interrupted_runs(runs_dir: Path, run_cfg: dict) -> list[str]:
+    """补录被中途杀掉的运行的费用。
+
+    进程被杀（内存不足、断电、休眠）时，那次运行的目录里只有 meta.json（状态 running）和已经写下的
+    transcript.jsonl，没有 usage.json。它已经花掉的 API 费用就不在累计统计里，预算和次数保护会少算。
+    这里从 transcript 里重新算出 usage.json，并标记这次运行无效（记录不完整，不计入准确率）。
+
+    只新增文件（usage.json、score.json、interrupted.json），不修改任何已有的记录：运行记录从不覆盖。
+    重复执行是安全的：补录过的目录有 usage.json，不会再处理。返回被处理的目录名。
+    """
+    if not runs_dir.exists():
+        return []
+    recovered = []
+    for meta_file in sorted(runs_dir.glob("*/meta.json")):
+        d = meta_file.parent
+        meta = json.loads(meta_file.read_text(encoding="utf-8"))
+        if meta.get("status") != "running" or (d / "usage.json").exists():
+            continue
+        events = read_transcript(d)
+        if not any(e["type"] == "request" for e in events):
+            continue  # agent 还没开始就被杀了：没有花过 API 费用，不用补录
+        entry = run_cfg["models"].get(meta["model_key"], {})
+        usage = build_usage_report(
+            events, entry, run_cfg["billing"], meta["fake"], meta.get("stage", 1)
+        )
+        usage["recovered_from_transcript"] = True
+        reason = "运行被中途打断，记录不完整（费用由 transcript 补录），不计入准确率"
+        (d / "usage.json").write_text(
+            json.dumps(usage, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        (d / "score.json").write_text(
+            json.dumps({"valid": False, "reason": reason}, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        submitted = any(
+            e["type"] == "tool_call" and e["name"] == "submit_diagnosis" and not e["is_error"]
+            for e in events
+        )
+        (d / "interrupted.json").write_text(
+            json.dumps(
+                {
+                    "reason": reason,
+                    "steps_in_transcript": sum(1 for e in events if e["type"] == "request"),
+                    "had_submitted_a_diagnosis": submitted,
+                    "recovered_at": datetime.now(UTC).isoformat(),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        recovered.append(d.name)
+    return recovered
 
 
 def read_transcript(run_dir: Path) -> list[dict]:

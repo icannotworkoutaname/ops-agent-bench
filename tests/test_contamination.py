@@ -48,6 +48,29 @@ def test_no_fault_run_treats_every_signature_as_foreign():
     assert [h["from_scenario"] for h in hits] == ["bad-kafka-bootstrap"]
 
 
+# 试跑里 kafka-down 那次运行的真实 get_events(kafka) 输出。它曾被误判为污染，
+# 因为 redis-down 的特征字符串里有一句 PodDisruptionBudget 对所有工作负载都会报的通用提示
+REAL_KAFKA_DOWN_EVENTS = """\
+最近 10 分钟内的事件，显示 3 条（新的在前）:
+  35s ago  Normal  NoPods x8  PodDisruptionBudget/kafka-controller  No matching pods found
+  37s ago  Normal  Killing  Pod/kafka-controller-0  Stopping container kafka
+"""
+
+
+def test_regression_a_kafka_down_run_is_not_contamination_from_redis_down():
+    hits = find_contamination([call(REAL_KAFKA_DOWN_EVENTS, "get_events")], "kafka-down", SIGS)
+    assert hits == []
+
+
+def test_a_generic_podisruptionbudget_message_is_not_a_signature_of_any_scenario():
+    # 通用提示不属于任何一个场景；带上对象名（redis-master）才是 redis-down 独有的
+    generic = "PodDisruptionBudget/kafka-controller  No matching pods found"
+    assert find_contamination([call(generic)], "no-fault", {**SIGS, "no-fault": ()}) == []
+    redis_pdb = "PodDisruptionBudget/redis-master  No matching pods found"
+    hits = find_contamination([call(redis_pdb)], "no-fault", {**SIGS, "no-fault": ()})
+    assert [h["from_scenario"] for h in hits] == ["redis-down"]
+
+
 def test_signatures_are_specific_enough_not_to_match_a_healthy_environment():
     healthy = (
         "NAME READY STATUS RESTARTS AGE\nredis-master-0 1/1 Running 0 3d\n"

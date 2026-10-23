@@ -12,12 +12,14 @@ class RedisDown(Scenario):
     )
 
     # query-service 连不上 Redis 时的日志，以及 Redis Pod 被停掉时的事件。
-    # 不能用 "redis-master-0" 这样的名字：健康环境里 list_pods 也会列出它
+    # 不能用 "redis-master-0" 这样的名字：健康环境里 list_pods 也会列出它；
+    # 也不能用 "No matching pods found"：任何工作负载没有 Pod 时 PodDisruptionBudget 都会报这句
+    # （试跑里 kafka-down 的运行就因此被误判为污染）。所以要带上 Redis 自己的对象名
     signatures = (
         "Cannot reconnect to [redis-master",
         "ConnectionWatchdog",
         "Stopping container redis",
-        "No matching pods found",
+        "PodDisruptionBudget/redis-master",
     )
 
     def inject(self) -> None:

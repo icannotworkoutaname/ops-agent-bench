@@ -22,6 +22,8 @@ NOISE = ("Unauthorized", "token has expired")
 def main() -> None:
     runs = []
     for d in sorted(RUNS_DIR.iterdir()):
+        if not (d / "meta.json").exists():  # runs/ 里还有 batches/、stability/ 等不是运行的目录
+            continue
         meta = json.loads((d / "meta.json").read_text())
         runs.append((datetime.fromisoformat(meta["started_at"]), d, meta))
     runs.sort(key=lambda r: r[0])

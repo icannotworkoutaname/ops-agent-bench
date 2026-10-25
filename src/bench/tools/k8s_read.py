@@ -59,6 +59,15 @@ def _format_state(state) -> str:
     return "-"
 
 
+def _format_last_state(state, cutoff: datetime | None, lookback_minutes: int | None) -> str:
+    """lastState 在 Pod 重启前会一直留着。回看窗口之外的终止记录不显示，和事件、日志、指标的窗口一致，
+    否则上一次运行（或环境里的意外，比如 Kafka 自己 OOMKilled）留下的痕迹会漏给 agent。"""
+    t = state.terminated if state else None
+    if cutoff is not None and t is not None and t.finished_at and t.finished_at < cutoff:
+        return f"(终止记录早于最近 {lookback_minutes} 分钟的回看窗口，不显示)"
+    return _format_state(state)
+
+
 def _format_resources(res) -> str:
     if res is None:
         return "-"
@@ -66,7 +75,14 @@ def _format_resources(res) -> str:
     return f"requests={dict(req)} limits={dict(lim)}"
 
 
-def format_pod_describe(pod) -> str:
+def format_pod_describe(
+    pod, lookback_minutes: int | None = None, now: datetime | None = None
+) -> str:
+    cutoff = (
+        (now or datetime.now(UTC)) - timedelta(minutes=lookback_minutes)
+        if lookback_minutes is not None
+        else None
+    )
     m, s = pod.metadata, pod.status
     owner = ", ".join(f"{o.kind}/{o.name}" for o in m.owner_references or []) or "-"
     lines = [
@@ -83,7 +99,7 @@ def format_pod_describe(pod) -> str:
         lines += [
             f"  - {cs.name}: image={cs.image} ready={cs.ready} restarts={cs.restart_count}",
             f"      state: {_format_state(cs.state)}",
-            f"      lastState: {_format_state(cs.last_state)}",
+            f"      lastState: {_format_last_state(cs.last_state, cutoff, lookback_minutes)}",
             f"      resources: {_format_resources(spec.resources if spec else None)}",
         ]
     # 还没有 container_statuses（例如刚创建）时，至少把 spec 里的容器列出来
@@ -213,7 +229,9 @@ class K8sReader:
 
     def describe_pod(self, namespace: str, name: str) -> str:
         check_namespace(namespace, self.allowed)
-        return format_pod_describe(self.core.read_namespaced_pod(name, namespace))
+        return format_pod_describe(
+            self.core.read_namespaced_pod(name, namespace), self.limits["lookback_minutes"]
+        )
 
     def get_pod_logs(self, namespace: str, name: str, tail: int | None, previous: bool) -> str:
         check_namespace(namespace, self.allowed)

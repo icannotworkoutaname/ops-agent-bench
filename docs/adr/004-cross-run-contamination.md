@@ -37,7 +37,14 @@ Prevent first, detect afterwards:
    not data).
 4. **Control-plane check** in `bench health`: auth errors in controller-manager / apiserver logs in the last 5
    minutes make the environment unhealthy.
-5. **After-the-fact check** (`src/bench/contamination.py`): every tool result of every run is scanned for
+5. **Pod terminations (added 2026-10-25 after the trial run).** The trial showed that the Kafka broker can be
+   OOMKilled by its own 768Mi limit while nobody touched it (twice in about a day), and that the pod then keeps
+   `lastState: OOMKilled` until it is recreated, which made an agent chase it for 66 tool calls. Two changes:
+   the cooldown also requires that no container in the visible namespaces and `monitoring` terminated
+   abnormally (exit code != 0) within the last W minutes (`check_recent_terminations`; the plain health check used
+   before and after a run does not include it, because injected faults terminate containers on purpose), and
+   `describe_pod` no longer shows a `lastState` whose `finishedAt` is older than W (the restart count stays visible).
+6. **After-the-fact check** (`src/bench/contamination.py`): every tool result of every run is scanned for
    scenario ids, harness names and the *other* scenarios' signature strings. A hit marks the run as suspected
    contamination: excluded from accuracy and listed separately in the report. Each scenario declares its own signatures;
    they are unit-tested not to collide with each other or to match healthy output.
@@ -56,9 +63,12 @@ baseline but costs more time per run.
 
 ## Known gaps
 
-- The window applies to events, logs and metrics. **Pod age, restart counts and `lastState`** shown by
-  `list_pods` / `describe_pod` are cumulative and not windowed; the cooldown does not erase them either.
-  Pods that were recreated by a restore start from zero, others keep their history.
+- The window applies to events, logs, metrics and (since 2026-10-25) `lastState`. **Pod age and restart
+  counts** shown by `list_pods` / `describe_pod` are cumulative and not windowed. Pods that were recreated by a
+  restore start from zero, others keep their history.
+- A Kafka OOMKill *during* a run is not detected by the cooldown (it only looks before injection). For every
+  scenario except `sp-oom` the `OOMKilled` signature flags it; for `sp-oom` it would not, so the formal batch is
+  checked afterwards against the Kafka pod's restart timestamps.
 - Scenarios that leave no unique string (`sp-pod-killed`, `ingestion-overload`) cannot be detected by the
   signature check; for them only the window and cooldown protect.
 - Stage-1 analysis (`scripts/analyze_stage1_contamination.py`): the four real runs showed no foreign signature
@@ -96,7 +106,12 @@ baseline but costs more time per run.
    最多等 30 分钟，超时则这次运行无效）。这样窗口能回看到的最早时刻也已经是上一次恢复之后了。
 3. **注入前删除事件**：删除三个可见 namespace 里的 Event（事件是临时的诊断记录，不是数据）。
 4. **控制面检查**：`bench health` 会检查 controller-manager / apiserver 最近 5 分钟日志里的认证错误，有就判环境不健康。
-5. **事后检查**（`src/bench/contamination.py`）：扫描每次运行所有工具返回的内容，找场景 id、测试框架的名字和**其他**场景的
+5. **Pod 异常终止（试跑后 2026-10-25 新增）**：试跑发现 Kafka broker 会在没人动它的情况下被自己的 768Mi
+   内存上限 OOMKilled（一天内两次），而且 Pod 在被重建之前一直保留 `lastState: OOMKilled`，让 agent 为它多查了 66 次工具。
+   两处改动：冷却期额外要求可见 namespace 和 `monitoring` 里最近 W 分钟内没有容器异常终止（退出码非 0，
+   `check_recent_terminations`；运行前后用的普通健康检查不含这一项，因为注入的故障本来就会让容器终止）；
+   `describe_pod` 不再显示 `finishedAt` 早于 W 的 `lastState`（重启次数仍然显示）。
+6. **事后检查**（`src/bench/contamination.py`）：扫描每次运行所有工具返回的内容，找场景 id、测试框架的名字和**其他**场景的
    特征字符串。命中就把这次运行标记为“疑似污染”：不计入准确率，在报告里单独列出。每个场景自己声明特征字符串，
    单元测试保证它们彼此不冲突、也不会匹配健康环境的输出。
 
@@ -113,8 +128,10 @@ W 越大，agent 能看到的健康基线越长，但每次运行的时间越长
 
 ## 已知的缺口
 
-- 窗口只作用于事件、日志和指标。`list_pods` / `describe_pod` 显示的**Pod 年龄、重启次数和 `lastState`** 是累计值，
-  不受窗口限制，冷却期也不会抹掉它们。被恢复流程重建的 Pod 从零开始，其他的会保留历史。
+- 窗口作用于事件、日志、指标和（2026-10-25 起）`lastState`。`list_pods` / `describe_pod` 显示的**Pod 年龄和
+  重启次数**是累计值，不受窗口限制。被恢复流程重建的 Pod 从零开始，其他的会保留历史。
+- 运行**过程中**发生的 Kafka OOMKilled，冷却期发现不了（它只看注入之前）。除 `sp-oom` 外的场景会被 `OOMKilled`
+  特征字符串标出来；`sp-oom` 不会，所以正式批量结束后要对照 Kafka Pod 的重启时间再核查一遍。
 - 没有独有字符串的场景（`sp-pod-killed`、`ingestion-overload`）无法被特征字符串检查发现，只能靠窗口和冷却期保护。
 - 第 1 阶段的分析（`scripts/analyze_stage1_contamination.py`）：4 次真实运行的所有工具返回里都没有发现外来的特征字符串；
   同时也用同一批运行验证了检测器本身——把它们当作对照场景来检查，每次运行自己的症状都被识别了出来，所以“0 命中”是有意义的。

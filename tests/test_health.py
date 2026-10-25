@@ -1,6 +1,14 @@
 """健康检查的判断逻辑。用假的 k8s 客户端，不需要集群。"""
 
-from bench.health import _safe, check_consumer_lag, check_control_plane, check_traffic
+from datetime import UTC, datetime, timedelta
+
+from bench.health import (
+    _safe,
+    check_consumer_lag,
+    check_control_plane,
+    check_recent_terminations,
+    check_traffic,
+)
 
 HEADER = "GROUP TOPIC PARTITION CURRENT-OFFSET LOG-END-OFFSET LAG CONSUMER-ID HOST CLIENT-ID\n"
 
@@ -107,3 +115,46 @@ def test_safe_turns_exceptions_into_failed_check():
     check = _safe("x", boom)
     assert not check.ok
     assert "连不上" in check.detail
+
+
+# ---------- 冷却期：最近有没有容器异常终止 ----------
+
+NOW = datetime(2026, 10, 24, 12, 0, tzinfo=UTC)
+
+
+class TerminationsK8s:
+    def __init__(self, items: list[dict]):
+        self.items = items
+
+    def abnormal_terminations(self, namespaces: list[str]) -> list[dict]:
+        return self.items
+
+
+def termination(seconds_ago: float, reason="OOMKilled", exit_code=137) -> dict:
+    return {
+        "namespace": "kafka",
+        "pod": "kafka-controller-0",
+        "container": "kafka",
+        "reason": reason,
+        "exit_code": exit_code,
+        "finished_at": NOW - timedelta(seconds=seconds_ago),
+    }
+
+
+def test_termination_inside_the_window_is_unhealthy_and_named():
+    k8s = TerminationsK8s([termination(120)])
+    ok, detail = check_recent_terminations(k8s, ["kafka"], 600, now=NOW)
+    assert not ok
+    assert "kafka/kafka-controller-0/kafka" in detail and "OOMKilled" in detail and "120s" in detail
+
+
+def test_termination_older_than_the_window_is_ignored():
+    # 这是试跑里的真实情况：Kafka 15 分钟前 OOMKilled，lastState 还留着，但已经滑出 10 分钟窗口
+    k8s = TerminationsK8s([termination(15 * 60)])
+    ok, _ = check_recent_terminations(k8s, ["kafka"], 600, now=NOW)
+    assert ok
+
+
+def test_no_terminations_is_healthy():
+    ok, _ = check_recent_terminations(TerminationsK8s([]), ["kafka"], 600, now=NOW)
+    assert ok

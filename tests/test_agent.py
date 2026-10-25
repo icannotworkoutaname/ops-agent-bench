@@ -259,15 +259,16 @@ def test_time_limit():
     assert len(model.snapshots) == 1  # 超时后不再发起新的请求
 
 
-def test_token_limit_counts_cached_and_uncached_input_plus_output():
+def test_token_limit_counts_uncached_input_plus_output_but_not_cache_hits():
     cfg = {**CFG, "max_total_tokens": 1000}
-    # 每步 400 未缓存 + 300 缓存命中 + 50 输出 = 750；第二步后累计 1500 ≥ 1000
+    # 每步 400 未缓存 + 300 缓存命中 + 50 输出：只有 450 算进上限；
+    # 第三步后累计 1350 ≥ 1000 才停（如果把缓存命中也算进去，第二步后就会停）
     step = lambda i: msg([tool_use(str(i), "list_pods", {})], inp=400, cache=300, out=50)
-    model = ScriptedModel([step(1), step(2), step(3)])
+    model = ScriptedModel([step(1), step(2), step(3), step(4)])
     result, _ = run(model, cfg=cfg)
     assert result.status == "no_diagnosis" and "token" in result.reason
-    assert result.steps == 2
-    assert result.usage_total["cache_read_input_tokens"] == 600
+    assert result.steps == 3
+    assert result.usage_total["cache_read_input_tokens"] == 900
 
 
 # ---------- 记录 ----------

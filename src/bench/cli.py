@@ -166,9 +166,16 @@ def build_run_deps(scenario, env, run_cfg, model_key, fake, no_cooldown) -> RunD
 
     cooldown_cfg = run_cfg["cooldown"]
 
+    def check_cooldown_health() -> tuple[bool, list[dict]]:
+        # 冷却期比平时多查一项：回看窗口内有没有容器异常终止（比如 Kafka 自己被 OOMKilled）
+        checks = run_health(
+            env, run_cfg, k8s, recent_termination_window_seconds=run_cfg["lookback_minutes"] * 60
+        )
+        return is_healthy(checks), [asdict(c) for c in checks]
+
     def cooldown():
         return wait_for_cooldown(
-            check_health,
+            check_cooldown_health,
             window_seconds=run_cfg["lookback_minutes"] * 60,
             interval_seconds=cooldown_cfg["check_interval_seconds"],
             max_wait_seconds=cooldown_cfg["max_wait_minutes"] * 60,

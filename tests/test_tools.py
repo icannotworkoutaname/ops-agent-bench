@@ -7,7 +7,7 @@
 import ast
 import subprocess
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -352,3 +352,47 @@ def test_logs_are_requested_with_both_since_and_tail():
 def test_empty_logs_say_the_window_was_empty():
     reader = make_reader(read_log=lambda previous: "")
     assert "最近 10 分钟内没有日志" in reader.get_pod_logs("default", "p", 50, False)
+
+
+def killed_pod(finished_seconds_ago: int):
+    status = client.V1ContainerStatus(
+        name="kafka",
+        image="kafka:4",
+        image_id="",
+        ready=True,
+        restart_count=1,
+        state=client.V1ContainerState(running=client.V1ContainerStateRunning(started_at=NOW)),
+        last_state=client.V1ContainerState(
+            terminated=client.V1ContainerStateTerminated(
+                exit_code=137,
+                reason="OOMKilled",
+                finished_at=NOW - timedelta(seconds=finished_seconds_ago),
+            )
+        ),
+    )
+    return client.V1Pod(
+        metadata=client.V1ObjectMeta(
+            name="kafka-controller-0", namespace="kafka", creation_timestamp=NOW
+        ),
+        spec=client.V1PodSpec(
+            node_name="minikube", containers=[client.V1Container(name="kafka", image="kafka:4")]
+        ),
+        status=client.V1PodStatus(phase="Running", container_statuses=[status]),
+    )
+
+
+def test_describe_shows_recent_last_state():
+    out = format_pod_describe(killed_pod(120), lookback_minutes=10, now=NOW)
+    assert "OOMKilled" in out
+
+
+def test_describe_hides_last_state_older_than_the_window_but_keeps_restart_count():
+    # 回归：试跑里 Kafka 15 分钟前 OOMKilled，lastState 漏给了下一次运行的 agent
+    out = format_pod_describe(killed_pod(15 * 60), lookback_minutes=10, now=NOW)
+    assert "OOMKilled" not in out
+    assert "回看窗口" in out
+    assert "restarts=1" in out
+
+
+def test_describe_without_a_window_is_unchanged():
+    assert "OOMKilled" in format_pod_describe(killed_pod(15 * 60))

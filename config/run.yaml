@@ -28,8 +28,10 @@ agent:
   max_steps: 25
   # 一次运行的最长时间（秒）。到点后不再发起新的请求
   max_seconds: 600
-  # 一次运行累计的 token 上限 = 每步 (input + cache_read + output) 之和。
-  # 上下文会随步数增长，所以累计值比单次请求大得多；这里是一个粗略的防失控保险
+  # 一次运行累计的 token 上限 = 每步 (input_tokens + output_tokens) 之和，
+  # **不含** cache_read_input_tokens（命中缓存的输入每步都会把整段历史重复计一次）。
+  # 试跑用的是含缓存命中的旧口径，同一个数值 500000；2026-10-25 经仓库所有者同意改口径。
+  # 这里是一个粗略的防失控保险
   max_total_tokens: 500000
   # 单次请求允许模型输出的最大 token 数。thinking 也算在里面，设太小会把回答截断
   max_output_tokens: 4096

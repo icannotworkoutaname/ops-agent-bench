@@ -63,15 +63,16 @@ def _usage_dict(usage: Any) -> dict:
     return usage.model_dump(mode="json") if hasattr(usage, "model_dump") else dict(usage or {})
 
 
-def _billable_tokens(usage: dict) -> int:
-    """一次请求消耗的 token：未命中缓存的输入 + 命中缓存的输入 + 输出。
+def _counted_tokens(usage: dict) -> int:
+    """算进 token 上限的部分：未命中缓存的输入 + 输出，**不含**命中缓存的输入。
 
+    为什么不含缓存命中：agent 每一步都要把整段历史重新发一遍，命中缓存的部分每步都会重复计一次，
+    累计下来只反映“步数 × 历史长度”，不是模型真正新读、新写的内容。试跑里 4 次没提交诊断有 3 次
+    撞上旧算法的 50 万上限，上限数值没变，只是改了口径（用户 2026-10-25 决定）。
     实测 DeepSeek 的 input_tokens 只是未命中缓存的那部分，缓存命中单独放在
-    cache_read_input_tokens 里，所以总输入要把两者相加。
+    cache_read_input_tokens 里，所以直接相加 input_tokens 和 output_tokens 就行。
     """
-    return sum(
-        usage.get(k) or 0 for k in ("input_tokens", "cache_read_input_tokens", "output_tokens")
-    )
+    return sum(usage.get(k) or 0 for k in ("input_tokens", "output_tokens"))
 
 
 def _tool_result(tool_use_id: str, text: str, is_error: bool = False) -> dict:
@@ -148,7 +149,7 @@ async def run_agent(
         for key, value in usage.items():
             if isinstance(value, int):
                 usage_total[key] = usage_total.get(key, 0) + value
-        tokens_used += _billable_tokens(usage)
+        tokens_used += _counted_tokens(usage)
         # 记录响应里实际的模型名：兼容端点可能把旧名字映射到新模型
         if response.model not in models_seen:
             models_seen.append(response.model)

@@ -192,6 +192,32 @@ class AdminK8s:
             )
         return sorted(info, key=lambda i: i["created"])
 
+    def abnormal_terminations(self, namespaces: list[str]) -> list[dict]:
+        """这些 namespace 里所有容器“异常终止”的记录（退出码非 0），当前状态和上一次状态都算。
+
+        为什么需要：容器在原地被杀（比如 Kafka 超过内存上限 OOMKilled）后，Pod 还在、很快又 Ready，
+        普通的就绪检查看不出来，但 describe_pod 会一直显示 lastState。冷却期要靠它知道
+        “最近发生过意外”，等回看窗口过去以后再开始下一次运行。
+        """
+        out = []
+        for ns in namespaces:
+            for p in self.core.list_namespaced_pod(ns).items:
+                for s in p.status.container_statuses or []:
+                    for state in (s.state, s.last_state):
+                        t = state.terminated if state else None
+                        if t and t.exit_code != 0 and t.finished_at:
+                            out.append(
+                                {
+                                    "namespace": ns,
+                                    "pod": p.metadata.name,
+                                    "container": s.name,
+                                    "reason": t.reason,
+                                    "exit_code": t.exit_code,
+                                    "finished_at": t.finished_at,
+                                }
+                            )
+        return out
+
     def pod_logs(
         self,
         namespace: str,

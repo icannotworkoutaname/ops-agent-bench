@@ -5,6 +5,7 @@
 """
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from bench.admin_k8s import AdminK8s
 from bench.config import EnvConfig
@@ -68,7 +69,37 @@ def check_control_plane(k8s: AdminK8s, cfg: dict) -> tuple[bool, str]:
     return total <= cfg["max_control_plane_auth_errors"], detail
 
 
-def run_health(env: EnvConfig, run_cfg: dict, k8s: AdminK8s) -> list[Check]:
+def check_recent_terminations(
+    k8s: AdminK8s, namespaces: list[str], window_seconds: float, now: datetime | None = None
+) -> tuple[bool, str]:
+    """最近 window_seconds 内有没有容器异常终止（OOMKilled、崩溃退出等）。
+
+    只用在冷却期：场景注入故意制造的终止，在恢复时 Pod 会被整个替换掉，记录跟着消失；
+    还留在现有 Pod 上的、窗口内发生的终止就是意外，要等它滑出回看窗口。
+    """
+    now = now or datetime.now(UTC)
+    recent = [
+        t
+        for t in k8s.abnormal_terminations(namespaces)
+        if (now - t["finished_at"]).total_seconds() < window_seconds
+    ]
+    if not recent:
+        return True, f"最近 {window_seconds:.0f}s 内没有容器异常终止"
+    detail = "；".join(
+        f"{t['namespace']}/{t['pod']}/{t['container']} {t['reason']}(exit {t['exit_code']}) "
+        f"{(now - t['finished_at']).total_seconds():.0f}s 前"
+        for t in recent
+    )
+    return False, detail
+
+
+def run_health(
+    env: EnvConfig,
+    run_cfg: dict,
+    k8s: AdminK8s,
+    recent_termination_window_seconds: float | None = None,
+) -> list[Check]:
+    """recent_termination_window_seconds 不为 None 时多检查一项“窗口内有没有容器异常终止”（冷却期用）。"""
     cfg = run_cfg["health"]
     checks: list[Check] = []
 
@@ -109,6 +140,16 @@ def run_health(env: EnvConfig, run_cfg: dict, k8s: AdminK8s) -> list[Check]:
     )
     checks.append(_safe("traffic (写入/查询)", lambda: check_traffic(k8s, cfg)))
     checks.append(_safe("control-plane (认证错误)", lambda: check_control_plane(k8s, cfg)))
+    if recent_termination_window_seconds is not None:
+        namespaces = list(dict.fromkeys([*env.agent_visible_namespaces, env.monitoring.namespace]))
+        checks.append(
+            _safe(
+                "容器异常终止 (窗口内)",
+                lambda: check_recent_terminations(
+                    k8s, namespaces, recent_termination_window_seconds
+                ),
+            )
+        )
     return checks
 
 

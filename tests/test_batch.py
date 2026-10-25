@@ -248,6 +248,30 @@ def test_a_failed_restore_in_a_run_stops_the_batch_immediately(tmp_path):
     assert result.status == "stopped" and "恢复失败" in result.reason and len(world.ran) == 3
 
 
+def test_an_acknowledged_restore_failure_lets_the_batch_continue_but_only_for_that_attempt(tmp_path):
+    store = make_store(tmp_path)
+    order = store.plan["order"]
+    for i, s in enumerate(order[:3], start=1):
+        store.add_attempt({"index": i, **attempt(s, restore_ok=(i != 3)), "contaminated": False})
+    # 没有确认：照旧停止
+    assert run_batch(store, FakeWorld().hooks(), None, 20).status == "stopped"
+    # 确认之后：从下一个场景继续，失败的那次仍然留在记录里
+    store.add_event("restore_failure_acknowledged", attempt_index=3, note="人工检查过")
+    world = FakeWorld()
+    result = run_batch(store, world.hooks(), None, 20)
+    assert result.status == "completed" and world.ran == order[3:]
+    assert store.attempts()[2]["restore_ok"] is False
+
+
+def test_acknowledging_one_attempt_does_not_cover_a_later_restore_failure():
+    attempts = [
+        {"index": 1, **attempt("a", restore_ok=False)},
+        {"index": 2, **attempt("b", restore_ok=False)},
+    ]
+    d = decide_next(plan(), attempts, {1})
+    assert d.action == "stop" and "恢复失败" in d.reason
+
+
 def test_changed_inputs_stop_the_batch_before_the_next_run(tmp_path):
     store, world = make_store(tmp_path), FakeWorld()
     world.input_problem = "系统提示的哈希变了"

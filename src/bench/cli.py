@@ -437,7 +437,17 @@ def batch_run(
 
 
 @batch_app.command("resume")
-def batch_resume(batch_id: str) -> None:
+def batch_resume(
+    batch_id: str,
+    acknowledge_restore_failure: Annotated[
+        str | None,
+        typer.Option(
+            help="上一次运行恢复失败导致批次停止时：人工检查完集群后，用这个选项写一句确认"
+            "（原因/检查了什么）才能续跑。确认只针对最后那一次尝试，写进 events.jsonl，"
+            "不改 attempts.jsonl；续跑前仍会做完整的健康检查。"
+        ),
+    ] = None,
+) -> None:
     """续跑一个被中断的批次：跳过已完成的运行，继续按原计划执行。"""
     env, run_cfg = load_env(), load_run()
     load_dotenv()
@@ -447,6 +457,17 @@ def batch_resume(batch_id: str) -> None:
     if plan["model_key"] not in run_cfg["models"]:
         typer.echo(f"批次用的模型 {plan['model_key']} 已不在配置里")
         raise typer.Exit(2)
+    if acknowledge_restore_failure:
+        attempts = store.attempts()
+        if not attempts or attempts[-1].get("restore_ok", True):
+            typer.echo("最后一次尝试并没有恢复失败，不需要确认")
+            raise typer.Exit(2)
+        store.add_event(
+            "restore_failure_acknowledged",
+            attempt_index=attempts[-1]["index"],
+            scenario=attempts[-1]["scenario"],
+            note=acknowledge_restore_failure,
+        )
     store.add_event("resumed")
     typer.echo(f"续跑批次 {batch_id}：已完成 {len(store.attempts())} 次尝试")
     _drive_batch(store, env, run_cfg)

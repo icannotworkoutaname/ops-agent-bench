@@ -136,9 +136,24 @@ class Decision:
     reason: str = ""
 
 
-def decide_next(plan: dict, attempts: list[dict]) -> Decision:
-    """下一步该做什么。只取决于计划和已完成的记录，所以续跑时结果和没中断过完全一致。"""
-    if attempts and not attempts[-1].get("restore_ok", True):
+def acknowledged_restore_failures(events: list[dict]) -> set[int]:
+    """人工检查过集群、确认可以越过“恢复失败”停止条件的那几次尝试（按序号）。
+
+    只认 events.jsonl 里显式的 restore_failure_acknowledged 事件，不改 attempts.jsonl：
+    恢复失败这件事本身仍然留在记录里（报告里要标注），确认只是另外追加的一行。
+    """
+    return {e["attempt_index"] for e in events if e.get("type") == "restore_failure_acknowledged"}
+
+
+def decide_next(
+    plan: dict, attempts: list[dict], acknowledged: frozenset[int] | set[int] = frozenset()
+) -> Decision:
+    """下一步该做什么。只取决于计划、已完成的记录和人工确认，所以续跑时结果和没中断过完全一致。"""
+    if (
+        attempts
+        and not attempts[-1].get("restore_ok", True)
+        and attempts[-1].get("index") not in acknowledged
+    ):
         return Decision("stop", reason="上一次运行恢复失败，必须停止整个批次")
     if attempts and attempts[-1].get("inputs_changed"):
         # 批次内系统提示、工具定义、模型配置都不能变，否则前后的运行不可比
@@ -286,7 +301,7 @@ def run_batch(
     plan = store.plan
     while True:
         attempts = store.attempts()
-        decision = decide_next(plan, attempts)
+        decision = decide_next(plan, attempts, acknowledged_restore_failures(store.events()))
         if decision.action == "done":
             store.add_event("completed")
             return BatchResult("completed", "每个场景都有足够的有效运行", len(attempts))

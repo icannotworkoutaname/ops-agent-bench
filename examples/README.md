@@ -23,7 +23,7 @@ The batch-level failures (no-fault false alarm, step-cap runs) are summarised in
   渲染时长文本被截断；完整的 `transcript.jsonl` 在被 gitignore 的 `runs/` 里，没有入库。
 - The "环境" section (health checks, cooldown, symptom confirmation, restore) is what the harness did around the agent; the agent never sees it.
   “环境”部分是框架在 agent 之外做的事，agent 看不到。
-- In `redis-down`, `kafka-down` and `ingestion-overload` the agent's thinking wonders whether the system is a test with an injected fault (it says things like "the injected fault" or "this benchmark scenario"). The prompt does not say so; the model infers it from the task wording. Whether that helps it is not measured here.
-  这三份里模型会猜“这是不是注入的故障 / 评测场景”。提示词里没有这么说，是模型从任务措辞推测的；这对结果有没有帮助，本项目没有测。
+- In `redis-down`, `kafka-down` and `ingestion-overload` the agent's thinking wonders whether the system is a test with an injected fault (it says things like "the injected fault" or "this benchmark scenario"). Whether this affects the results was not tested in this project.
+  这三份里模型会猜“这是不是注入的故障 / 评测场景”。这是否影响结果，本项目没有测。
 - The score appears at the end; the ground truth is never shown to the agent.
   评分在末尾；标准答案不会给 agent 看。

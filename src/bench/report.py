@@ -21,6 +21,13 @@ def _read(path: Path):
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
 
 
+def _run_ref(run_dir: Path) -> str:
+    """报告里引用运行目录时只写 runs/<目录名>：
+    绝对路径带着生成报告那台机器的用户名，报告是要提交、公开的；
+    在仓库根目录下 `bench show runs/<目录名>` 照样能用。"""
+    return f"runs/{run_dir.name}"
+
+
 def load_run(attempt: dict) -> dict:
     """把一次尝试对应的运行目录读成一个字典。目录丢了也不报错，只是缺字段。"""
     d = Path(attempt["run_dir"])
@@ -230,7 +237,7 @@ def _section_wrong(truths, valid) -> list[str]:
     for r in wrong:
         t = truths[r["scenario"]]
         lines.append(
-            f"| `{r['dir']}` | `{r['scenario']}` | {t[0]} / {t[1]} | "
+            f"| `{_run_ref(r['dir'])}` | `{r['scenario']}` | {t[0]} / {t[1]} | "
             f"{r['answer_category'] or NO_SUBMISSION} / {r['answer_component'] or '-'} |"
         )
     return [*lines, ""]
@@ -249,7 +256,9 @@ def _section_sample(plan, valid) -> list[str]:
         "请用 `bench show` 检查这些答对的运行是不是真的基于正确的证据，而不是碰巧。",
         "",
     ]
-    lines += [f"- `{r['dir']}`（`{r['scenario']}`）" for r in picked] or ["（没有答对的运行）"]
+    lines += [f"- `{_run_ref(r['dir'])}`（`{r['scenario']}`）" for r in picked] or [
+        "（没有答对的运行）"
+    ]
     return [*lines, ""]
 
 
@@ -264,5 +273,5 @@ def _section_excluded(invalid) -> list[str]:
             if r.get("contaminated")
             else r.get("reason", r["status"])
         )
-        lines.append(f"- `{r['dir']}`（`{r['scenario']}`，{r['status']}）: {why}")
+        lines.append(f"- `{_run_ref(r['dir'])}`（`{r['scenario']}`，{r['status']}）: {why}")
     return [*lines, ""]

@@ -110,7 +110,8 @@ def load_env() -> EnvConfig:
     raw = _load_yaml("env.yaml")
     return EnvConfig(
         kube_context=raw["kube_context"],
-        music_streaming_repo=Path(raw["music_streaming_repo"]),
+        # 允许写 ~/xxx：配置要提交到公开仓库，不能写死某个用户的家目录
+        music_streaming_repo=Path(raw["music_streaming_repo"]).expanduser(),
         agent_visible_namespaces=raw["agent_visible_namespaces"],
         bench_namespace=raw["bench_namespace"],
         deployments=[Workload(**d) for d in raw["deployments"]],

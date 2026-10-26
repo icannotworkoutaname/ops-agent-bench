@@ -248,7 +248,9 @@ def test_a_failed_restore_in_a_run_stops_the_batch_immediately(tmp_path):
     assert result.status == "stopped" and "恢复失败" in result.reason and len(world.ran) == 3
 
 
-def test_an_acknowledged_restore_failure_lets_the_batch_continue_but_only_for_that_attempt(tmp_path):
+def test_an_acknowledged_restore_failure_lets_the_batch_continue_but_only_for_that_attempt(
+    tmp_path,
+):
     store = make_store(tmp_path)
     order = store.plan["order"]
     for i, s in enumerate(order[:3], start=1):

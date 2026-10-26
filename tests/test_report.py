@@ -180,6 +180,13 @@ def test_wrong_runs_are_listed_with_their_answers(tmp_path):
     assert "r1" not in wrong and "r3" not in wrong  # 答对的不在里面
 
 
+def test_run_directories_are_referenced_without_absolute_paths(tmp_path):
+    # 报告要提交、公开：不能带生成它的机器上的绝对路径（用户名等）
+    text = build_report(build(tmp_path, sample_runs()), TRUTHS)
+    assert str(tmp_path) not in text
+    assert "`runs/r2`" in text
+
+
 def test_the_sample_of_correct_runs_is_reproducible_and_only_contains_correct_ones(tmp_path):
     store = build(
         tmp_path, sample_runs() + [(f"c{i}", "redis-down", RIGHT_REDIS, {}) for i in range(10)]

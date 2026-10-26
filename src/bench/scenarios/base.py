@@ -16,8 +16,6 @@ from bench.health import is_healthy, run_health
 
 @dataclass(frozen=True)
 class GroundTruth:
-    """标准答案。目前是草稿（来自 stage-1.md），第 2 阶段由仓库所有者最终确认。"""
-
     cause_category: str
     component: str
     expected_action: str

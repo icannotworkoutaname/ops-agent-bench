@@ -8,10 +8,8 @@ Accepted (stage 1).
 
 ## Context
 
-The point of this project is to compare how LLM agents diagnose known faults: accuracy,
-out-of-bounds attempts and cost. For that to be trustworthy, the repository owner (who does
-not write code) must be able to read exactly what the agent saw and did at every step, and
-we must be able to account for every token that was billed.
+This project compares how different LLM agents diagnose known faults: accuracy,
+out-of-bounds attempts and cost.
 
 Options considered:
 
@@ -38,7 +36,7 @@ assuming it behaves like Anthropic's own API. What we found:
 
 ## Decision
 
-Write the loop by hand (`src/bench/agent/loop.py`, one file) using the Messages API directly,
+Write the loop by hand (`src/bench/agent/loop.py`, one file) using the Messages API,
 and expose the cluster tools through an MCP server (see ADR 002).
 
 - Every tool call of a response is executed in order, and all results go back in **one** user
@@ -55,9 +53,9 @@ and expose the cluster tools through an MCP server (see ADR 002).
 
 ## Consequences
 
-- More code is ours: we must handle parallel tool calls, bad `submit_diagnosis` arguments,
-  retries and stop conditions ourselves. That is about 200 lines and is covered by unit tests.
-- Nothing is hidden: `bench show` can reconstruct every step from the transcript.
+- Parallel tool calls, bad `submit_diagnosis` arguments, retries and stop conditions are all
+  handled in our own code: about 200 lines, covered by unit tests.
+- Nothing is hidden, `bench show` can reconstruct every step from the transcript.
 - Switching to another model only needs a new entry in `config/run.yaml`, as long as it speaks
   the Messages API. Behaviour differences of a new endpoint must be verified with
   `check_llm_endpoint.py` first.
@@ -72,9 +70,7 @@ and expose the cluster tools through an MCP server (see ADR 002).
 
 ## 背景
 
-这个项目要比较不同 LLM agent 诊断已知故障的表现：准确率、越权尝试和成本。要让结论可信，
-仓库所有者（不写代码）必须能看清 agent 每一步看到了什么、做了什么，我们也必须能说清楚
-每一个被计费的 token 是怎么来的。
+这个项目比较不同 LLM agent 诊断已知故障的表现：准确率、越权尝试和成本。
 
 考虑过的方案：
 
@@ -98,7 +94,7 @@ and expose the cluster tools through an MCP server (see ADR 002).
 
 ## 决定
 
-直接用 Messages API 手写循环（`src/bench/agent/loop.py`，一个文件），集群工具通过 MCP server
+用 Messages API 手写循环（`src/bench/agent/loop.py`，一个文件），集群工具通过 MCP server
 提供（见 ADR 002）。
 
 - 一次响应里的所有工具调用按顺序逐个执行，所有结果放进**同一条** user 消息，用 `tool_use_id`
@@ -114,8 +110,7 @@ and expose the cluster tools through an MCP server (see ADR 002).
 
 ## 影响
 
-- 更多代码要自己负责：并行工具调用、不合法的 `submit_diagnosis` 参数、重试、停止条件。大约
-  200 行，有单元测试覆盖。
-- 没有任何东西是隐藏的：`bench show` 可以从记录里还原每一步。
+- 并行工具调用、不合法的 `submit_diagnosis` 参数、重试、停止条件。大约200 行，有单元测试覆盖。
+- 没有任何东西是隐藏的，`bench show` 可以从记录里还原每一步。
 - 换模型只需要在 `config/run.yaml` 里加一个条目（前提是它支持 Messages API）。新端点的行为差异
   必须先用 `check_llm_endpoint.py` 验证。

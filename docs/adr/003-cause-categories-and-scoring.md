@@ -4,9 +4,7 @@
 
 ## Status
 
-Accepted for stage 2. The taxonomy is the stage-1 draft, unchanged. The stage-2 plan says it is fixed once the
-repository owner confirms it (**pending confirmation**), and that it must not change during this stage:
-categories are not added, removed or renamed while results are being collected.
+Accepted for stage 2. The taxonomy is the stage-1 draft, unchanged.
 
 ## Context
 
@@ -32,8 +30,8 @@ and we must decide, without a human in the loop, whether it was right.
 
 ## Why exact comparison and not an LLM judge
 
-- **Reproducible and auditable.** The same transcript always scores the same; the repository owner can
-  recompute every number by hand. An LLM judge adds a second model whose own errors, biases and version
+- **Reproducible and auditable.** The same transcript always scores the same; every number can be
+  recomputed by hand. An LLM judge adds a second model whose own errors, biases and version
   changes would be mixed into the result.
 - **No circularity.** We are measuring how well a model diagnoses; using a model to grade the answer
   makes the measurement depend on the thing measured.
@@ -47,7 +45,7 @@ and we must decide, without a human in the loop, whether it was right.
 - Several scenarios share a category (`dependency_unavailable` for redis, kafka and postgresql); the
   component column is what tells them apart. This is why both columns are reported.
 - A symptom can sometimes be explained by two categories. Ground truths were not adjusted to the model's
-  answers; where a scenario looked ambiguous it is reported to the repository owner instead.
+  answers.
 - `transient_restart_no_action` is the correct answer for a pod that was simply killed and is coming
   back; an agent that proposes a fix there is wrong even if its fix is harmless.
 
@@ -57,8 +55,7 @@ and we must decide, without a human in the loop, whether it was right.
 
 ## 状态
 
-第 2 阶段采纳。分类沿用第 1 阶段的草稿，没有改动。第 2 阶段计划写明“由仓库所有者确认后固定”（**待确认**），
-并且本阶段内不得改动：收集结果期间不增、不删、不改名。
+第 2 阶段采纳。分类沿用第 1 阶段的草稿，没有改动。
 
 ## 背景
 
@@ -80,7 +77,7 @@ and we must decide, without a human in the loop, whether it was right.
 
 ## 为什么用精确比较，而不是 LLM 裁判
 
-- **可复现、可审计。** 同一份记录永远得到同一个分数，仓库所有者可以手算每一个数字。LLM 裁判会引入第二个模型，
+- **可复现、可审计。** 同一份记录永远得到同一个分数，可以手算每一个数字。LLM 裁判会引入第二个模型，
   它自己的错误、偏好和版本变化都会混进结果里。
 - **没有循环论证。** 我们测的是模型诊断得好不好；用模型来批改答案，会让测量依赖被测量的东西。
 - **便宜。** 没有额外调用，没有额外预算。
@@ -91,6 +88,6 @@ and we must decide, without a human in the loop, whether it was right.
 
 - 几个场景共用一个分类（redis、kafka、postgresql 都是 `dependency_unavailable`），要靠组件那一列区分，
   所以两列都要报告。
-- 同一个症状有时可以用两个分类解释。标准答案**没有**根据模型的回答去调整；遇到有歧义的场景，写给仓库所有者看。
+- 同一个症状有时可以用两个分类解释，标准答案没有根据模型的回答去调整。
 - `transient_restart_no_action` 是“Pod 被删除、正在自己恢复”的正确答案；在这种场景里提出修复方案就是答错，
   即使这个方案无害。

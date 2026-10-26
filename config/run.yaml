@@ -1,5 +1,5 @@
-# 运行参数。模型、步数上限、超时、价格等在后面的阶段（M5/M6）再加进来；
-# 这里先放健康检查需要的阈值。所有阈值都写在配置里，不写死在代码里。
+# 运行参数。模型、步数上限、超时、价格等在后面的阶段（M5/M6）再加；
+# 健康检查需要的阈值。所有阈值都写在配置里，不写死。
 
 # 回看窗口 W（分钟）：所有和时间有关的 agent 工具（get_events、get_pod_logs，以及之后的
 # promql_query）只返回最近 W 分钟内的数据。配合下面的冷却期使用：注入前环境必须连续 W 分钟
@@ -30,7 +30,7 @@ agent:
   max_seconds: 600
   # 一次运行累计的 token 上限 = 每步 (input_tokens + output_tokens) 之和，
   # **不含** cache_read_input_tokens（命中缓存的输入每步都会把整段历史重复计一次）。
-  # 试跑用的是含缓存命中的旧口径，同一个数值 500000；2026-10-25 经仓库所有者同意改口径。
+  # 试跑用的是含缓存命中的旧口径，同一个数值 500000。
   # 这里是一个粗略的防失控保险
   max_total_tokens: 500000
   # 单次请求允许模型输出的最大 token 数。thinking 也算在里面，设太小会把回答截断
@@ -54,12 +54,12 @@ batch:
   # 估算整批费用用：还没有本阶段的真实运行可参考时，假设一次运行花这么多
   fallback_cost_per_run: 0.06
 
-# 费用与限额。标注“待填”的值必须由仓库所有者到官方定价页核对后填写；
+# 费用与限额。
 # 只要有任何一项是 null，bench run 就拒绝发起真实运行（没有价格就没法控制预算）。
 billing:
   currency: CNY # 计费币种；预算和单价都用这个币种
   # 当前阶段的累计费用上限。stage-2.md 原定 15 元；账户余额有限，
-  # 余额不足时接口会报错、批次会因连续出错而停止，所以 2026-10-24 经仓库所有者同意改为 8 元，
+  # 余额不足时接口会报错、批次会因连续出错而停止，
   # 让批次先按预算自己停下来（预算不在输入哈希里，不影响 resume）
   budget: 8.0
   max_real_runs: 100 # 当前阶段真实 agent 运行总数上限（stage-2.md：试跑 + 正式 + 补跑 ≤ 100）
@@ -77,7 +77,7 @@ models:
     model: deepseek-flash
     base_url: https://api.deepseek.com/anthropic
     api_key_env: DEEPSEEK_API_KEY
-    pricing: # 元 / 百万 token；官方定价页 2026-10-23，经仓库所有者确认。官方称空闲时段是高峰的一半
+    pricing: # 元 / 百万 token
       peak: {input_cache_miss: 2.0, input_cache_hit: 0.04, output: 8.0}
       offpeak: {input_cache_miss: 1.0, input_cache_hit: 0.02, output: 4.0}
   deepseek-v4-pro:

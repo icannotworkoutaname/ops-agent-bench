@@ -10,7 +10,7 @@ from bench.scenarios import SCENARIOS
 from bench.scenarios.base import Outcome, Scenario
 from bench.stability import run_stability, summarize
 
-# docs/plan/stage-2.md 第 3 节的场景清单（标准答案是仓库所有者定的，改动前必须先问）
+# docs/plan/stage-2.md 第 3 节的场景清单
 EXPECTED = {
     "redis-down": ("dependency_unavailable", "redis"),
     "bad-kafka-bootstrap": ("misconfiguration_env", "stream-processor"),

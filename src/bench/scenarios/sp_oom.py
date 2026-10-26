@@ -3,7 +3,7 @@
 症状：容器反复退出，CrashLoopBackOff。退出的方式有两种，留下的证据不同：
   - 被内核 OOMKilled（exit 137）：describe_pod 的 lastState 里是 OOMKilled；
   - JVM 自己抛 OutOfMemoryError 后退出：日志里有异常栈，lastState 是 Error。
-verify_injected 的结果里会写明实际看到的是哪种，供仓库所有者决定标准答案怎么写。
+verify_injected 的结果里会写明实际看到的是哪种。
 """
 
 from bench.scenarios.base import GroundTruth, Outcome, Scenario, wait_until

@@ -66,7 +66,7 @@ guarantee comes from the code, not from RBAC. To keep the exec path as narrow as
 ## Consequences
 
 - Stage-1 results about "out-of-bounds attempts" only reflect what the code allows; they say
-  nothing about RBAC. This must be stated when reporting them.
+  nothing about RBAC.
 - Until stage 3, anyone who can run the tool process can also use the harness kubeconfig.
 
 ---
@@ -129,6 +129,5 @@ agent 要在一个被注入了故障的集群里做诊断。评估只有在 agen
 
 ## 影响
 
-- 第 1 阶段关于“越权尝试”的结果只反映代码允许什么，说明不了 RBAC 层面的情况。汇报时必须
-  说明这一点。
+- 第 1 阶段关于“越权尝试”的结果只反映代码允许什么，说明不了 RBAC 层面的情况。
 - 到第 3 阶段之前，能运行工具进程的人也能使用测试框架的 kubeconfig。

@@ -8,3 +8,6 @@ __pycache__/
 *.Zone.Identifier
 *:Zone.Identifier
 .idea/
+
+# 给仓库所有者自己看的讲解文档，只留在本地，不进 git
+docs/walkthrough-*.md

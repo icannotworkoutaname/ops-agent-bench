@@ -37,10 +37,9 @@ Other commands: `bench inject <scenario>`, `bench restore <scenario>`, `bench tr
 | `src/bench/tools/` | the **agent side**: read-only MCP tools. Must never import `admin_k8s` |
 | `src/bench/agent/` | hand-written loop, prompts, `submit_diagnosis`, model clients |
 | `runs/` | one directory per run, never overwritten, not in git |
-| `docs/` | stage plan, ADRs, walkthrough |
+| `docs/` | stage plans, ADRs, stage reports, results |
 
-Read `CLAUDE.md` for the working conventions and isolation principles, and
-`docs/walkthrough-stage-1.md` for an explanation of how everything fits together.
+Read `CLAUDE.md` for the working conventions and isolation principles.
 
 ## Safety notes
 
@@ -84,9 +83,9 @@ uv run pytest -m integration -s         # 需要集群；约 13 分钟，会真�
 | `src/bench/tools/` | **agent 一侧**：只读 MCP 工具，绝不能 import `admin_k8s` |
 | `src/bench/agent/` | 手写循环、提示词、`submit_diagnosis`、模型客户端 |
 | `runs/` | 每次运行一个目录，从不覆盖，不进 git |
-| `docs/` | 阶段计划、ADR、讲解文档 |
+| `docs/` | 阶段计划、ADR、阶段报告、结果 |
 
-工作约定和隔离原则见 `CLAUDE.md`，整体怎么运转见 `docs/walkthrough-stage-1.md`。
+工作约定和隔离原则见 `CLAUDE.md`。
 
 ## 安全说明
 

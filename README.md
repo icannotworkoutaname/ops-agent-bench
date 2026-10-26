@@ -2,89 +2,294 @@
 
 > English first, Chinese below.
 
-Inject a known fault into the [music-streaming](https://github.com/icannotworkoutaname/music-streaming-analytics) system running on minikube, let an LLM agent
-diagnose it with read-only tools, and score the result with fixed rules. The goal is to compare
-diagnosis accuracy, out-of-bounds attempts and cost across models and levels of autonomy.
+A benchmark for **LLM operations agents**. It injects a known fault into the
+[music-streaming](https://github.com/icannotworkoutaname/music-streaming-analytics) system running on
+minikube, lets an agent diagnose it with **read-only tools**, and scores the diagnosis with **fixed
+rules** (no LLM judge). Everything about a run is recorded, so every number in a report can be
+recomputed from the raw files.
 
-Stage 1 delivers one complete, recorded chain: pick a scenario -> check the environment is healthy
--> inject -> confirm the symptom -> agent investigates and submits a structured diagnosis ->
-score -> restore -> confirm healthy again. It does **not** try to make the agent accurate.
+What makes it different from "ask a model about a log file":
 
-## Quick start (inside WSL)
+- **A real cluster.** Kafka, Redis, PostgreSQL and three Spring services on minikube. The agent sees
+  what an on-call engineer would see: pods, events, logs, consumer lag and Prometheus metrics.
+- **No agent framework.** The agent loop is hand-written (one file) so every request, tool call and
+  token can be inspected and accounted for ([ADR 001](docs/adr/001-handwritten-agent-loop.md)).
+- **Results you can trust.** Runs must not contaminate each other, inputs must not drift between runs,
+  and a run that fails to restore the environment stops the whole batch. See
+  [ADR 004](docs/adr/004-cross-run-contamination.md).
+
+## How one run works
+
+```
+health check -> cooldown -> inject fault -> confirm the symptom is really there
+   -> agent investigates with read-only tools -> submit_diagnosis (cause category + component + evidence)
+   -> restore -> health check again -> score -> write the run record (runs/<utc>-<scenario>-<model>/)
+```
+
+The agent has eight read-only tools (`list_pods`, `describe_pod`, `get_pod_logs`, `get_events`,
+`get_deployment`, `get_consumer_lag`, `promql_query`, `list_metrics`) and one way to finish:
+`submit_diagnosis`. A diagnosis is scored on two exact comparisons with the ground truth: the cause
+category and the faulty component. Not submitting anything (step, time or token limit reached) scores
+as wrong.
+
+## Scenarios
+
+11 scenarios: 10 injected faults and one no-fault control.
+
+| Scenario | What is injected | Ground truth (category / component) |
+|---|---|---|
+| `redis-down` | Redis scaled to 0 | `dependency_unavailable` / `redis` |
+| `kafka-down` | Kafka scaled to 0 (writes still return 202; the evidence is in logs) | `dependency_unavailable` / `kafka` |
+| `postgres-down` | PostgreSQL scaled to 0 | `dependency_unavailable` / `postgresql` |
+| `bad-kafka-bootstrap` | `stream-processor` gets an unresolvable Kafka address | `misconfiguration_env` / `stream-processor` |
+| `missing-pg-secret` | `postgres-credentials` deleted, `query-service` restarted | `missing_secret_or_config` / `query-service` |
+| `query-probe-misconfig` | `query-service` readiness probe points at a path that returns 404 | `probe_misconfiguration` / `query-service` |
+| `sp-cpu-throttle` | `stream-processor` CPU limit 100m under higher traffic | `resource_limit_cpu` / `stream-processor` |
+| `sp-oom` | `stream-processor` memory limit too small to start | `resource_limit_memory` / `stream-processor` |
+| `ingestion-overload` | traffic far above what `ingestion-service` can handle | `load_saturation` / `ingestion-service` |
+| `sp-pod-killed` | a `stream-processor` pod is deleted (it recovers by itself) | `transient_restart_no_action` / `stream-processor` |
+| `no-fault` | nothing | `no_fault` / `none` |
+
+## Results (stage 2, `deepseek-flash`)
+
+11 scenarios x 5 runs = 55 valid runs, 0 invalid, 3.76 CNY in total.
+
+| | Fully correct |
+|---|---|
+| 10 fault scenarios | **42 / 50 (84%)** |
+| including the no-fault control | 42 / 55 (76%) |
+
+- **7 scenarios were 5/5 with identical answers every time** (`redis-down`, `kafka-down`,
+  `postgres-down`, `bad-kafka-bootstrap`, `missing-pg-secret`, `query-probe-misconfig`, `sp-oom`).
+  These faults leave explicit evidence: an error in a log, an event reason, a pod state.
+- **The weak spots are the faults with little explicit evidence:** `sp-cpu-throttle` 2/5,
+  `ingestion-overload` 1/5, `sp-pod-killed` 4/5, and the **no-fault control 0/5**.
+- **12 of the 13 wrong answers were "no diagnosis":** the agent hit the 25-step limit while still
+  investigating, and never concluded (none of them hit the token limit). The 13th was a false alarm on
+  the no-fault control: the agent reported a partition imbalance it saw in the baseline as a fault.
+
+Read these as scenario-level findings, not as a general accuracy figure: one model, one random seed,
+five runs per scenario, one environment. Full tables (per-scenario results, confusion matrix, stability,
+wrong runs) are in [`docs/results-stage-2.md`](docs/results-stage-2.md). The report is generated by
+`bench batch report` directly from the run records; no LLM summarises it.
+
+## How the results are kept trustworthy
+
+- **Cross-run contamination** (a previous fault leaking into the next run) is defended in layers: a
+  10-minute lookback window on everything time-based the agent can see, a cooldown that needs
+  consecutive healthy minutes with no abnormal container termination, clearing events before injection,
+  a control-plane auth check, and a post-run signature scan. What the window cannot catch is documented
+  in [ADR 004](docs/adr/004-cross-run-contamination.md).
+- **Batch runner** (`bench batch`): a seeded run order (same seed, same order), resume from
+  `attempts.jsonl`, automatic pause during DeepSeek peak hours, re-runs of invalid runs, and a hard stop
+  on a failed restore, repeated invalid or erroring runs, budget or run-count limits, or changed inputs.
+  The system prompt, tool definitions and model/agent config are hashed at the start and checked
+  throughout.
+- **Exact scoring**, no partial credit and no LLM judge ([ADR 003](docs/adr/003-cause-categories-and-scoring.md)).
+
+## Prerequisites
+
+- Linux or WSL, Python 3.12+, [`uv`](https://docs.astral.sh/uv/), `kubectl`, `minikube`.
+- The music-streaming system deployed on minikube (kube-context `minikube`). The resource names the
+  benchmark expects are in `config/env.yaml`: three Deployments in `default`, Redis and PostgreSQL in
+  `data`, a single-node Kafka (Bitnami chart, pod `kafka-controller-0`) in `kafka`.
+- A DeepSeek API key for real runs (the model is reached through its Anthropic-compatible endpoint).
+  `--fake` runs need no key and no network.
+
+## Quick start
 
 ```bash
 uv sync
-cp .env.example .env          # then put DEEPSEEK_API_KEY=... in .env (never commit it)
-uv run bench health           # every component + traffic + control plane must be OK
-uv run bench traffic up       # deploy the in-cluster traffic generator (once)
-uv run bench list             # the three scenarios
-uv run bench run redis-down --fake      # whole chain with a scripted model: no network, free
-uv run bench run redis-down             # real model; refuses if prices/budget are missing,
-                                        # the run cap/budget is reached, or during peak hours
-uv run bench show runs/<run-dir>        # read a whole run step by step (--full: no truncation)
-uv run pytest                           # unit tests
-uv run pytest -m integration -s         # needs the cluster; ~13 min, injects and restores faults
+cp .env.example .env            # then put DEEPSEEK_API_KEY=... in .env (never commit it)
+uv run bench health             # every component, the traffic generator and the control plane must be OK
+uv run bench traffic up         # deploy the in-cluster traffic generator (once)
+uv run bench monitoring up      # deploy the in-cluster Prometheus (once)
+uv run bench list               # scenarios and their ground truths
+
+uv run bench run redis-down --fake      # the whole chain with a scripted model: no network, free
+uv run bench run redis-down             # a real run; refused if the budget / run cap is reached,
+                                        # or during DeepSeek peak hours (unless --allow-peak)
+uv run bench show runs/<run-dir>        # read a run step by step (--full: no truncation)
+
+uv run bench stability sp-oom --rounds 3          # inject -> symptom -> restore x3, no model calls
+uv run bench batch run --dry-run                  # print the plan and the estimated time / cost
+uv run bench batch run --scenarios all --repeats 5 --seed 2
+uv run bench batch status <batch-id>              # progress
+uv run bench batch resume <batch-id>              # continue an interrupted batch
+uv run bench batch report <batch-id> --out docs/results-stage-2.md
+
+uv run pytest                   # 321 unit tests, no cluster needed
+uv run pytest -m integration -s # needs the cluster; injects and restores real faults
 ```
 
-Other commands: `bench inject <scenario>`, `bench restore <scenario>`, `bench traffic down|stats`.
+Other commands: `bench inject <scenario>` and `bench restore <scenario>` (manual use),
+`bench traffic rate|stats|down`, `bench monitoring down`.
 
 ## Layout
 
 | Path | What it is |
 |---|---|
 | `config/env.yaml`, `config/run.yaml` | resource names; limits, thresholds, prices, budget, peak hours |
-| `src/bench/admin_k8s.py`, `health.py`, `scenarios/`, `traffic/` | the **write side**: inject, restore, health |
+| `src/bench/admin_k8s.py`, `health.py`, `cooldown.py`, `scenarios/`, `traffic/`, `monitoring/` | the **write side**: inject, restore, health, cooldown |
 | `src/bench/tools/` | the **agent side**: read-only MCP tools. Must never import `admin_k8s` |
-| `src/bench/agent/` | hand-written loop, prompts, `submit_diagnosis`, model clients |
+| `src/bench/agent/` | the hand-written loop, prompts, `submit_diagnosis`, model clients, fake model |
+| `src/bench/scoring.py`, `contamination.py`, `batch.py`, `report.py` | scoring, the post-run signature scan, the batch runner, the report generator |
 | `runs/` | one directory per run, never overwritten, not in git |
-| `docs/` | stage plans, ADRs, stage reports, results |
+| `docs/adr/` | architecture decision records (English first, then Chinese) |
+| `docs/results-stage-2.md` | the generated stage-2 report |
 
-## Safety notes
+## Safety and limits
 
-- The harness only talks to the `minikube` kube-context. It never modifies the music-streaming repository.
-- Real runs are capped (15 runs, a cost budget) and refused during DeepSeek peak hours unless `--allow-peak`.
-- The tools are read-only **by code**, not by RBAC yet; see `docs/adr/002-tool-permissions-and-pods-exec.md`.
+- The harness only talks to the `minikube` kube-context and never modifies the music-streaming repository.
+- Real runs are capped per stage (run count and a cost budget in `config/run.yaml`).
+- The agent's tools are read-only **by code**, not by RBAC; `get_consumer_lag` needs `pods/exec`
+  ([ADR 002](docs/adr/002-tool-permissions-and-pods-exec.md)). So an "out-of-bounds attempts" count says
+  what the code allows, nothing about RBAC.
+- The Kafka broker has a 768Mi memory limit and was OOM-killed on its own several times during the
+  benchmark, independent of any injected fault. This is handled by the cooldown and recorded in the
+  report, but it is a property of the test environment, not something the benchmark fixed.
+
+## Status
+
+Stages 1 and 2 are done: the full chain with 3 scenarios, then 11 scenarios, the contamination
+defences, the batch runner and the first full result set. Planned next: write operations with levels of
+autonomy and approval (stage 3), and comparing a second model (stage 4).
 
 ---
 
 # ops-agent-bench（中文）
 
-在 minikube 上的 [music-streaming](https://github.com/icannotworkoutaname/music-streaming-analytics) 系统里注入已知故障，让 LLM agent 用只读工具诊断，再用固定规则打分。
-目标是比较不同模型、不同自主程度下的诊断准确率、越权尝试和成本。
+一个评测 **LLM 运维 agent** 的基准。它在 minikube 上的
+[music-streaming](https://github.com/icannotworkoutaname/music-streaming-analytics) 系统里注入已知故障，
+让 agent 只用**只读工具**诊断，再用**固定规则**打分（不用 LLM 当裁判）。每次运行都完整记录，
+报告里的每个数字都能从原始文件重新算出来。
 
-第 1 阶段交付一条完整且有记录的链路：选场景 → 确认环境健康 → 注入 → 确认症状 → agent 调查并提交结构化诊断
-→ 打分 → 恢复 → 再次确认健康。**不**追求 agent 诊断得准。
+和“把一份日志丢给模型问一下”的区别：
 
-## 快速开始（在 WSL 里）
+- **真实集群。** minikube 上有 Kafka、Redis、PostgreSQL 和三个 Spring 服务。agent 看到的是值班工程师会看到的东西：
+  Pod、事件、日志、消费 lag 和 Prometheus 指标。
+- **不用 agent 框架。** agent 循环手写（一个文件），每一次请求、工具调用和 token 都能查、能对账
+  （[ADR 001](docs/adr/001-handwritten-agent-loop.md)）。
+- **结果可信。** 运行之间不能互相污染，输入不能在运行之间漂移，恢复环境失败就停下整个批次。
+  见 [ADR 004](docs/adr/004-cross-run-contamination.md)。
+
+## 一次运行是怎么走的
+
+```
+健康检查 -> 冷却期 -> 注入故障 -> 确认症状真的出现
+   -> agent 用只读工具调查 -> submit_diagnosis（原因分类 + 组件 + 证据）
+   -> 恢复 -> 再次健康检查 -> 打分 -> 写运行记录（runs/<UTC 时间>-<场景>-<模型>/）
+```
+
+agent 有 8 个只读工具（`list_pods`、`describe_pod`、`get_pod_logs`、`get_events`、`get_deployment`、
+`get_consumer_lag`、`promql_query`、`list_metrics`），结束的唯一方式是 `submit_diagnosis`。
+诊断按两个精确比较打分：原因分类和故障组件是否和标准答案一致。到步数 / 时间 / token 上限还没提交，算错。
+
+## 场景
+
+11 个场景：10 个注入故障，加 1 个无故障对照。
+
+| 场景 | 注入了什么 | 标准答案（分类 / 组件） |
+|---|---|---|
+| `redis-down` | Redis 缩到 0 | `dependency_unavailable` / `redis` |
+| `kafka-down` | Kafka 缩到 0（写入仍返回 202，证据在日志里） | `dependency_unavailable` / `kafka` |
+| `postgres-down` | PostgreSQL 缩到 0 | `dependency_unavailable` / `postgresql` |
+| `bad-kafka-bootstrap` | `stream-processor` 的 Kafka 地址解析不到 | `misconfiguration_env` / `stream-processor` |
+| `missing-pg-secret` | 删除 `postgres-credentials` 后重启 `query-service` | `missing_secret_or_config` / `query-service` |
+| `query-probe-misconfig` | `query-service` 的就绪探针指向一个返回 404 的路径 | `probe_misconfiguration` / `query-service` |
+| `sp-cpu-throttle` | `stream-processor` 的 CPU limit 压到 100m，同时调高流量 | `resource_limit_cpu` / `stream-processor` |
+| `sp-oom` | `stream-processor` 的内存 limit 小到起不来 | `resource_limit_memory` / `stream-processor` |
+| `ingestion-overload` | 流量远超 `ingestion-service` 的处理能力 | `load_saturation` / `ingestion-service` |
+| `sp-pod-killed` | 删除一个 `stream-processor` Pod（它会自己恢复） | `transient_restart_no_action` / `stream-processor` |
+| `no-fault` | 什么都不注入 | `no_fault` / `none` |
+
+## 结果（第 2 阶段，`deepseek-flash`）
+
+11 个场景 × 5 次 = 55 次有效运行，0 次无效，总费用 3.76 元。
+
+| | 完全正确 |
+|---|---|
+| 10 个故障场景 | **42 / 50（84%）** |
+| 含无故障对照 | 42 / 55（76%） |
+
+- **7 个场景 5/5，且每次答案完全一致**（`redis-down`、`kafka-down`、`postgres-down`、`bad-kafka-bootstrap`、
+  `missing-pg-secret`、`query-probe-misconfig`、`sp-oom`）。这些故障都留下了明确的证据：日志里的报错、事件原因、Pod 状态。
+- **弱点是证据不明显的故障：** `sp-cpu-throttle` 2/5，`ingestion-overload` 1/5，`sp-pod-killed` 4/5，
+  以及**无故障对照 0/5**。
+- **13 个错误里 12 个是“没提交诊断”：** agent 撞上 25 步上限时还在调查，始终没有下结论（没有一次撞 token 上限）。
+  第 13 个是无故障对照上的误报：agent 把基线里看到的分区不均衡当成了故障。
+
+这些是场景层面的发现，不是通用的准确率：一个模型、一个随机种子、每个场景 5 次、一个环境。
+完整表格（每场景结果、混淆矩阵、稳定性、答错的运行）在 [`docs/results-stage-2.md`](docs/results-stage-2.md)。
+报告由 `bench batch report` 直接从运行记录生成，不经过任何 LLM 总结。
+
+## 怎么保证结果可信
+
+- **跨运行污染**（上一次的故障漏进下一次）分层防护：agent 能看到的所有和时间有关的数据只取最近 10 分钟的回看窗口；
+  冷却期要求连续健康且窗口内没有容器异常终止；注入前清理事件；控制面认证检查；运行后用特征字符串扫描。
+  窗口防不住什么，写在 [ADR 004](docs/adr/004-cross-run-contamination.md) 里。
+- **批量运行器**（`bench batch`）：种子决定运行顺序（同样的种子顺序相同），从 `attempts.jsonl` 续跑，
+  DeepSeek 高峰时段自动暂停，无效运行自动补跑；遇到恢复失败、连续无效或出错、超预算或次数上限、输入被改动就立即停止。
+  系统提示、工具定义、模型和 agent 配置在批次开始时记哈希，全程核对。
+- **精确打分**，不给部分分，也不用 LLM 当裁判（[ADR 003](docs/adr/003-cause-categories-and-scoring.md)）。
+
+## 前置条件
+
+- Linux 或 WSL，Python 3.12+，[`uv`](https://docs.astral.sh/uv/)，`kubectl`，`minikube`。
+- minikube 上已部署 music-streaming 系统（kube-context 为 `minikube`）。基准期望的资源名写在 `config/env.yaml`：
+  `default` 里三个 Deployment，`data` 里的 Redis 和 PostgreSQL，`kafka` 里的单节点 Kafka（Bitnami chart，Pod 名 `kafka-controller-0`）。
+- 真实运行需要 DeepSeek API key（通过它的 Anthropic 兼容端点调用）。`--fake` 不需要 key，也不联网。
+
+## 快速开始
 
 ```bash
 uv sync
-cp .env.example .env          # 然后在 .env 里填 DEEPSEEK_API_KEY=...（绝不要提交）
-uv run bench health           # 各组件、流量、控制面都必须 OK
-uv run bench traffic up       # 部署集群内流量发生器（只需一次）
-uv run bench list             # 三个场景
+cp .env.example .env            # 然后在 .env 里填 DEEPSEEK_API_KEY=...（绝不要提交）
+uv run bench health             # 各组件、流量发生器、控制面都必须 OK
+uv run bench traffic up         # 部署集群内流量发生器（只需一次）
+uv run bench monitoring up      # 部署集群内 Prometheus（只需一次）
+uv run bench list               # 场景和标准答案
+
 uv run bench run redis-down --fake      # 用假模型跑完整链路：不联网、不花钱
-uv run bench run redis-down             # 真实模型；价格 / 预算没填、次数或预算到上限、高峰时段都会拒绝
+uv run bench run redis-down             # 真实运行；预算 / 次数到上限、DeepSeek 高峰时段会拒绝（除非 --allow-peak）
 uv run bench show runs/<运行目录>       # 逐步查看一次运行的全过程（--full 不截断）
-uv run pytest                           # 单元测试
-uv run pytest -m integration -s         # 需要集群；约 13 分钟，会真的注入并恢复故障
+
+uv run bench stability sp-oom --rounds 3          # 注入→症状→恢复 ×3，不调用模型
+uv run bench batch run --dry-run                  # 只打印计划和预计时长 / 费用
+uv run bench batch run --scenarios all --repeats 5 --seed 2
+uv run bench batch status <批次 id>               # 看进度
+uv run bench batch resume <批次 id>               # 续跑被中断的批次
+uv run bench batch report <批次 id> --out docs/results-stage-2.md
+
+uv run pytest                   # 321 个单元测试，不需要集群
+uv run pytest -m integration -s # 需要集群；会真的注入并恢复故障
 ```
 
-其他命令：`bench inject <场景>`、`bench restore <场景>`、`bench traffic down|stats`。
+其他命令：`bench inject <场景>`、`bench restore <场景>`（手动排查用），`bench traffic rate|stats|down`，`bench monitoring down`。
 
 ## 目录
 
 | 路径 | 说明 |
 |---|---|
 | `config/env.yaml`、`config/run.yaml` | 资源名；上限、阈值、价格、预算、高峰时段 |
-| `src/bench/admin_k8s.py`、`health.py`、`scenarios/`、`traffic/` | **写权限一侧**：注入、恢复、健康检查 |
+| `src/bench/admin_k8s.py`、`health.py`、`cooldown.py`、`scenarios/`、`traffic/`、`monitoring/` | **写权限一侧**：注入、恢复、健康检查、冷却期 |
 | `src/bench/tools/` | **agent 一侧**：只读 MCP 工具，绝不能 import `admin_k8s` |
-| `src/bench/agent/` | 手写循环、提示词、`submit_diagnosis`、模型客户端 |
+| `src/bench/agent/` | 手写循环、提示词、`submit_diagnosis`、模型客户端、假模型 |
+| `src/bench/scoring.py`、`contamination.py`、`batch.py`、`report.py` | 打分、运行后的特征扫描、批量运行器、报告生成 |
 | `runs/` | 每次运行一个目录，从不覆盖，不进 git |
-| `docs/` | 阶段计划、ADR、阶段报告、结果 |
+| `docs/adr/` | 架构决策记录（先英文后中文） |
+| `docs/results-stage-2.md` | 生成的第 2 阶段结果报告 |
 
-## 安全说明
+## 安全与局限
 
 - 测试框架只连 `minikube` 这个 kube-context，不修改 music-streaming 仓库。
-- 真实运行有次数（15 次）和费用预算上限；DeepSeek 高峰时段拒绝运行，除非加 `--allow-peak`。
-- 工具的“只读”目前靠代码保证，还不是靠 RBAC；见 `docs/adr/002-tool-permissions-and-pods-exec.md`。
+- 真实运行按阶段设上限（次数和费用预算，在 `config/run.yaml`）。
+- agent 的工具“只读”靠**代码**保证，不是 RBAC；`get_consumer_lag` 需要 `pods/exec`
+  （[ADR 002](docs/adr/002-tool-permissions-and-pods-exec.md)）。所以“越权尝试”的数据只说明代码允许什么，说明不了 RBAC。
+- Kafka broker 的内存上限是 768Mi，评测期间在没有注入任何故障的情况下自己 OOM 过多次。冷却期会处理它，报告里也有记录，
+  但它是测试环境本身的特性，不是基准修好的东西。
+
+## 进度
+
+第 1、2 阶段已完成：先是 3 个场景的完整链路，然后是 11 个场景、污染防护、批量运行器和第一套完整结果。
+计划中的下一步：写操作加自主程度分级与审批（第 3 阶段），以及对比第二个模型（第 4 阶段）。

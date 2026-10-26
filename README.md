@@ -2,7 +2,7 @@
 
 > English first, Chinese below.
 
-Inject a known fault into the music-streaming system running on minikube, let an LLM agent
+Inject a known fault into the [music-streaming](https://github.com/icannotworkoutaname/music-streaming-analytics) system running on minikube, let an LLM agent
 diagnose it with read-only tools, and score the result with fixed rules. The goal is to compare
 diagnosis accuracy, out-of-bounds attempts and cost across models and levels of autonomy.
 
@@ -49,7 +49,7 @@ Other commands: `bench inject <scenario>`, `bench restore <scenario>`, `bench tr
 
 # ops-agent-bench（中文）
 
-在 minikube 上的 music-streaming 系统里注入已知故障，让 LLM agent 用只读工具诊断，再用固定规则打分。
+在 minikube 上的 [music-streaming](https://github.com/icannotworkoutaname/music-streaming-analytics) 系统里注入已知故障，让 LLM agent 用只读工具诊断，再用固定规则打分。
 目标是比较不同模型、不同自主程度下的诊断准确率、越权尝试和成本。
 
 第 1 阶段交付一条完整且有记录的链路：选场景 → 确认环境健康 → 注入 → 确认症状 → agent 调查并提交结构化诊断

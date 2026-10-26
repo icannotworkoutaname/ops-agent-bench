@@ -15,3 +15,7 @@ docs/walkthrough-*.md
 # 本地的 AI 工作约定，不进 git（代码不依赖它）
 CLAUDE.md
 .claude/
+
+# 给仓库所有者自己看的阶段计划和阶段报告，只留在本地
+docs/plan/
+docs/report-stage-*.md

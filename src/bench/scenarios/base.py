@@ -31,7 +31,7 @@ def wait_until(check: Callable[[], Outcome], timeout: float, interval: float = 3
     """反复调用 check，直到成功或超时。超时返回最后一次的结果，并注明耗时。
 
     这里的 timeout 来自配置文件。超时就如实报告“没出现 / 没恢复”，
-    不要靠调大 timeout 或悄悄重试来掩盖问题（CLAUDE.md 的约定）。
+    不要靠调大 timeout 或悄悄重试来掩盖问题：本项目的约定是失败如实记录。
     """
     start = time.monotonic()
     last = Outcome(False, "还没有检查过")

@@ -39,8 +39,6 @@ Other commands: `bench inject <scenario>`, `bench restore <scenario>`, `bench tr
 | `runs/` | one directory per run, never overwritten, not in git |
 | `docs/` | stage plans, ADRs, stage reports, results |
 
-Read `CLAUDE.md` for the working conventions and isolation principles.
-
 ## Safety notes
 
 - The harness only talks to the `minikube` kube-context. It never modifies the music-streaming repository.
@@ -84,8 +82,6 @@ uv run pytest -m integration -s         # 需要集群；约 13 分钟，会真�
 | `src/bench/agent/` | 手写循环、提示词、`submit_diagnosis`、模型客户端 |
 | `runs/` | 每次运行一个目录，从不覆盖，不进 git |
 | `docs/` | 阶段计划、ADR、阶段报告、结果 |
-
-工作约定和隔离原则见 `CLAUDE.md`。
 
 ## 安全说明
 

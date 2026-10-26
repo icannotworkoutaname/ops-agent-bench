@@ -11,3 +11,7 @@ __pycache__/
 
 # 给仓库所有者自己看的讲解文档，只留在本地，不进 git
 docs/walkthrough-*.md
+
+# 本地的 AI 工作约定，不进 git（代码不依赖它）
+CLAUDE.md
+.claude/
